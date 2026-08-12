@@ -17,6 +17,7 @@ from bobvoyage.tools.current_conditions import get_current_conditions
 from bobvoyage.tools.analyze_trends import analyze_trends
 from bobvoyage.tools.detect_anomalies import detect_anomalies
 from bobvoyage.tools.predict_conditions import predict_conditions
+from bobvoyage.tools.assess_mission_risk import assess_mission_risk, DEFAULT_MISSION_PROFILE
 
 # ---------------------------------------------------------------------------
 # Server definition
@@ -173,6 +174,61 @@ async def list_tools() -> list[Tool]:
                 "required": [],
             },
         ),
+        Tool(
+            name="assess_mission_risk",
+            description=(
+                "Assess spacecraft operational risk by combining current space-weather "
+                "observations, trend analysis, anomaly detection, and short-term "
+                "forecasts. Returns domain-level risk scores (radiation, communications, "
+                "navigation, power, attitude_control), an overall mission risk level "
+                "(LOW/MODERATE/HIGH/CRITICAL), traceable evidence, and recommendations. "
+                "Accepts a configurable mission sensitivity profile."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "conditions": {
+                        "type": "object",
+                        "description": (
+                            "Observation dict from get_current_conditions()[\"observation\"]. "
+                            "Omit to assess without current observations."
+                        ),
+                    },
+                    "trends": {
+                        "type": "object",
+                        "description": (
+                            "Trend dict from analyze_trends()[\"trends\"]. "
+                            "Omit to assess without trend analysis."
+                        ),
+                    },
+                    "anomalies": {
+                        "type": "array",
+                        "description": (
+                            "Anomaly list from detect_anomalies()[\"anomalies\"]. "
+                            "Omit or pass [] when no anomalies."
+                        ),
+                    },
+                    "predictions": {
+                        "type": "array",
+                        "description": (
+                            "Prediction list from predict_conditions()[\"predictions\"]. "
+                            "Omit to assess without forecast data."
+                        ),
+                    },
+                    "mission_profile": {
+                        "type": "object",
+                        "description": (
+                            "Sensitivity profile with keys: radiation_sensitivity, "
+                            "communications_sensitivity, navigation_sensitivity, "
+                            "power_sensitivity, attitude_control_sensitivity. "
+                            "Each value: 'low', 'medium', or 'high'. "
+                            f"Defaults to: {DEFAULT_MISSION_PROFILE}."
+                        ),
+                    },
+                },
+                "required": [],
+            },
+        ),
     ]
 
 
@@ -213,6 +269,16 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             horizon=horizon,
             lookback=lookback,
             dataset_path=dataset_path,
+        )
+        return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+    if name == "assess_mission_risk":
+        result = assess_mission_risk(
+            conditions      = arguments.get("conditions"),
+            trends          = arguments.get("trends"),
+            anomalies       = arguments.get("anomalies"),
+            predictions     = arguments.get("predictions"),
+            mission_profile = arguments.get("mission_profile"),
         )
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
