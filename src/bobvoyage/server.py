@@ -18,6 +18,7 @@ from bobvoyage.tools.analyze_trends import analyze_trends
 from bobvoyage.tools.detect_anomalies import detect_anomalies
 from bobvoyage.tools.predict_conditions import predict_conditions
 from bobvoyage.tools.assess_mission_risk import assess_mission_risk, DEFAULT_MISSION_PROFILE
+from bobvoyage.tools.correlate_space_events import correlate_space_events
 
 # ---------------------------------------------------------------------------
 # Server definition
@@ -229,6 +230,52 @@ async def list_tools() -> list[Tool]:
                 "required": [],
             },
         ),
+        Tool(
+            name="correlate_space_events",
+            description=(
+                "Identify temporal associations between NASA DONKI space-weather "
+                "events (CME, flare, geomagnetic storm, SEP) and NOAA telemetry "
+                "observations. Returns per-event correlation scores, statistical "
+                "deviations, component breakdown, and guarded evidence strings. "
+                "Establishes statistical/temporal association only — never claims "
+                "causality. Intelligence layer consumed by mission risk assessment."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "events": {
+                        "type": "array",
+                        "description": (
+                            "List of SpaceWeatherEvent dicts from NASA DONKI provider. "
+                            "Each must have event_type and event_time."
+                        ),
+                    },
+                    "observations": {
+                        "type": "array",
+                        "description": (
+                            "List of SpaceWeatherObservation dicts from NOAA provider. "
+                            "Each must have timestamp and at least one numeric parameter."
+                        ),
+                    },
+                    "lookback_hours": {
+                        "type": "number",
+                        "description": "Hours before each event to search for correlated observations.",
+                        "default": 4.0,
+                    },
+                    "lookahead_hours": {
+                        "type": "number",
+                        "description": "Hours after each event to search for correlated observations.",
+                        "default": 2.0,
+                    },
+                    "min_score": {
+                        "type": "number",
+                        "description": "Minimum correlation score [0,1] to include in results.",
+                        "default": 0.1,
+                    },
+                },
+                "required": [],
+            },
+        ),
     ]
 
 
@@ -279,6 +326,16 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             anomalies       = arguments.get("anomalies"),
             predictions     = arguments.get("predictions"),
             mission_profile = arguments.get("mission_profile"),
+        )
+        return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+    if name == "correlate_space_events":
+        result = correlate_space_events(
+            events            = arguments.get("events"),
+            observations      = arguments.get("observations"),
+            lookback_hours    = arguments.get("lookback_hours", 4.0),
+            lookahead_hours   = arguments.get("lookahead_hours", 2.0),
+            min_score         = arguments.get("min_score", 0.1),
         )
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
