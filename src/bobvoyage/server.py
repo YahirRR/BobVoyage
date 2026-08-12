@@ -15,6 +15,7 @@ from mcp.types import TextContent, Tool
 
 from bobvoyage.tools.current_conditions import get_current_conditions
 from bobvoyage.tools.analyze_trends import analyze_trends
+from bobvoyage.tools.detect_anomalies import detect_anomalies
 
 # ---------------------------------------------------------------------------
 # Server definition
@@ -81,6 +82,55 @@ async def list_tools() -> list[Tool]:
                 "required": [],
             },
         ),
+        Tool(
+            name="detect_anomalies",
+            description=(
+                "Identify space-weather observations that significantly deviate from "
+                "a historical baseline using z-score analysis. Returns per-parameter "
+                "anomaly details including observed value, baseline mean/std, z-score, "
+                "severity (moderate/significant), and direction. Statistical anomaly "
+                "detection only — no prediction or risk assessment."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "recent_window": {
+                        "type": "integer",
+                        "description": (
+                            "Number of latest observations to examine. "
+                            "Must be ≥ 1. Default is 6."
+                        ),
+                        "default": 6,
+                        "minimum": 1,
+                    },
+                    "baseline_window": {
+                        "type": "integer",
+                        "description": (
+                            "Number of observations before the recent window used to "
+                            "establish the baseline (mean, std). Must be ≥ 3. Default is 48."
+                        ),
+                        "default": 48,
+                        "minimum": 3,
+                    },
+                    "z_threshold": {
+                        "type": "number",
+                        "description": (
+                            "Minimum |z-score| to flag an observation as anomalous. "
+                            "Must be > 0. Default is 2.0."
+                        ),
+                        "default": 2.0,
+                    },
+                    "dataset_path": {
+                        "type": "string",
+                        "description": (
+                            "Optional path to the CSV dataset. "
+                            "Defaults to data/space_weather.csv in the project root."
+                        ),
+                    },
+                },
+                "required": [],
+            },
+        ),
     ]
 
 
@@ -98,6 +148,19 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         window = arguments.get("window", 12)
         dataset_path = arguments.get("dataset_path")
         result = analyze_trends(window=window, dataset_path=dataset_path)
+        return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+    if name == "detect_anomalies":
+        recent_window   = arguments.get("recent_window", 6)
+        baseline_window = arguments.get("baseline_window", 48)
+        z_threshold     = arguments.get("z_threshold", 2.0)
+        dataset_path    = arguments.get("dataset_path")
+        result = detect_anomalies(
+            recent_window=recent_window,
+            baseline_window=baseline_window,
+            z_threshold=z_threshold,
+            dataset_path=dataset_path,
+        )
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
     return [
