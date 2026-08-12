@@ -179,10 +179,11 @@ async def list_tools() -> list[Tool]:
             name="assess_mission_risk",
             description=(
                 "Assess spacecraft operational risk by combining current space-weather "
-                "observations, trend analysis, anomaly detection, and short-term "
-                "forecasts. Returns domain-level risk scores (radiation, communications, "
-                "navigation, power, attitude_control), an overall mission risk level "
-                "(LOW/MODERATE/HIGH/CRITICAL), traceable evidence, and recommendations. "
+                "observations, trend analysis, anomaly detection, short-term forecasts, "
+                "and optionally correlated space-weather events (M8). Returns domain-level "
+                "risk scores (radiation, communications, navigation, power, attitude_control), "
+                "an overall mission risk level (LOW/MODERATE/HIGH/CRITICAL), traceable "
+                "evidence (OBSERVED/ANALYZED/PREDICTED/CORRELATED), and recommendations. "
                 "Accepts a configurable mission sensitivity profile."
             ),
             inputSchema={
@@ -214,6 +215,16 @@ async def list_tools() -> list[Tool]:
                         "description": (
                             "Prediction list from predict_conditions()[\"predictions\"]. "
                             "Omit to assess without forecast data."
+                        ),
+                    },
+                    "correlated_events": {
+                        "type": "array",
+                        "description": (
+                            "Correlation list from correlate_space_events()[\"correlations\"]. "
+                            "When supplied, each event's correlation score is translated into "
+                            "a domain-specific risk addend via the event-to-domain relevance "
+                            "matrix.  An env-saturation discount prevents double-counting with "
+                            "environmental evidence."
                         ),
                     },
                     "mission_profile": {
@@ -321,11 +332,12 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
 
     if name == "assess_mission_risk":
         result = assess_mission_risk(
-            conditions      = arguments.get("conditions"),
-            trends          = arguments.get("trends"),
-            anomalies       = arguments.get("anomalies"),
-            predictions     = arguments.get("predictions"),
-            mission_profile = arguments.get("mission_profile"),
+            conditions         = arguments.get("conditions"),
+            trends             = arguments.get("trends"),
+            anomalies          = arguments.get("anomalies"),
+            predictions        = arguments.get("predictions"),
+            correlated_events  = arguments.get("correlated_events"),
+            mission_profile    = arguments.get("mission_profile"),
         )
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
