@@ -16,6 +16,7 @@ from mcp.types import TextContent, Tool
 from bobvoyage.tools.current_conditions import get_current_conditions
 from bobvoyage.tools.analyze_trends import analyze_trends
 from bobvoyage.tools.detect_anomalies import detect_anomalies
+from bobvoyage.tools.predict_conditions import predict_conditions
 
 # ---------------------------------------------------------------------------
 # Server definition
@@ -131,6 +132,47 @@ async def list_tools() -> list[Tool]:
                 "required": [],
             },
         ),
+        Tool(
+            name="predict_conditions",
+            description=(
+                "Forecast space-weather parameters using Holt's Double Exponential "
+                "Smoothing. Returns per-parameter predicted values with prediction "
+                "intervals, walk-forward validation metrics (MAE, RMSE, MAPE), and "
+                "a confidence score. Forecasting only — no anomaly detection or "
+                "risk assessment."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "horizon": {
+                        "type": "integer",
+                        "description": (
+                            "Number of future steps to forecast. Must be ≥ 1. "
+                            "Default 12. At 5-min resolution: 12 → 60 min."
+                        ),
+                        "default": 12,
+                        "minimum": 1,
+                    },
+                    "lookback": {
+                        "type": "integer",
+                        "description": (
+                            "Most-recent historical observations used for fitting. "
+                            "Must be ≥ 10. Default 48 (≈ 4 hours)."
+                        ),
+                        "default": 48,
+                        "minimum": 10,
+                    },
+                    "dataset_path": {
+                        "type": "string",
+                        "description": (
+                            "Optional path to the CSV dataset. "
+                            "Defaults to data/space_weather.csv in the project root."
+                        ),
+                    },
+                },
+                "required": [],
+            },
+        ),
     ]
 
 
@@ -159,6 +201,17 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             recent_window=recent_window,
             baseline_window=baseline_window,
             z_threshold=z_threshold,
+            dataset_path=dataset_path,
+        )
+        return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+    if name == "predict_conditions":
+        horizon      = arguments.get("horizon", 12)
+        lookback     = arguments.get("lookback", 48)
+        dataset_path = arguments.get("dataset_path")
+        result = predict_conditions(
+            horizon=horizon,
+            lookback=lookback,
             dataset_path=dataset_path,
         )
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
