@@ -14,6 +14,7 @@ from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool
 
 from bobvoyage.tools.current_conditions import get_current_conditions
+from bobvoyage.tools.analyze_trends import analyze_trends
 
 # ---------------------------------------------------------------------------
 # Server definition
@@ -47,7 +48,39 @@ async def list_tools() -> list[Tool]:
                 },
                 "required": [],
             },
-        )
+        ),
+        Tool(
+            name="analyze_trends",
+            description=(
+                "Analyze recent space-weather observations and identify meaningful "
+                "trends. Returns per-parameter direction (increasing/decreasing/stable), "
+                "percentage and absolute change, severity classification, and a ranked "
+                "list of significant trends. Descriptive analysis only — no prediction "
+                "or risk assessment."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "window": {
+                        "type": "integer",
+                        "description": (
+                            "Number of most-recent observations to include. "
+                            "Must be ≥ 2. Default is 12 (≈ 1 hour at 5-min resolution)."
+                        ),
+                        "default": 12,
+                        "minimum": 2,
+                    },
+                    "dataset_path": {
+                        "type": "string",
+                        "description": (
+                            "Optional path to the CSV dataset. "
+                            "Defaults to data/space_weather.csv in the project root."
+                        ),
+                    },
+                },
+                "required": [],
+            },
+        ),
     ]
 
 
@@ -59,6 +92,12 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     if name == "get_current_conditions":
         dataset_path = arguments.get("dataset_path")
         result = get_current_conditions(dataset_path=dataset_path)
+        return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
+    if name == "analyze_trends":
+        window = arguments.get("window", 12)
+        dataset_path = arguments.get("dataset_path")
+        result = analyze_trends(window=window, dataset_path=dataset_path)
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
     return [
