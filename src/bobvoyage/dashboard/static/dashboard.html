@@ -1,0 +1,1411 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BobVoyage — Mission Control</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<style>
+/* ── Reset & Base ────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg:        #0a0c10;
+  --surface:   #111318;
+  --surface2:  #191d26;
+  --border:    #232838;
+  --border2:   #2e364a;
+  --text:      #d4d9e8;
+  --muted:     #606880;
+  --dim:       #404760;
+  --accent:    #4f9cf9;
+  --accent2:   #7c5cd8;
+  --green:     #2ecc71;
+  --amber:     #f0a500;
+  --red:       #e74c3c;
+  --orange:    #e67e22;
+  --low:       #2ecc71;
+  --moderate:  #f0a500;
+  --high:      #e67e22;
+  --critical:  #e74c3c;
+  --font:      'Courier New', 'Monaco', monospace;
+  --sans:      -apple-system, 'Segoe UI', system-ui, sans-serif;
+  --radius:    6px;
+  --transition: 180ms ease;
+}
+html, body { height: 100%; overflow: hidden; }
+body {
+  font-family: var(--sans);
+  font-size: 13px;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.5;
+}
+/* ── Scrollbars ─────────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: var(--surface); }
+::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 3px; }
+
+/* ── Layout ─────────────────────────────────────────────────────────── */
+#root {
+  display: grid;
+  grid-template-rows: 40px 1fr;
+  height: 100vh;
+  overflow: hidden;
+}
+/* Header */
+#header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 16px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  user-select: none;
+}
+#header .logo {
+  font-family: var(--font);
+  font-size: 14px;
+  font-weight: bold;
+  color: var(--accent);
+  letter-spacing: 1px;
+  white-space: nowrap;
+}
+#header .logo span { color: var(--text); }
+#header .sep { flex: 1; }
+#mode-badge {
+  padding: 2px 10px;
+  border-radius: 3px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  cursor: pointer;
+  border: 1px solid transparent;
+  transition: var(--transition);
+}
+#mode-badge.demo { background: rgba(240,165,0,.15); color: var(--amber); border-color: var(--amber); }
+#mode-badge.live { background: rgba(46,204,113,.15); color: var(--green); border-color: var(--green); }
+#freshness {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+  font-family: var(--font);
+}
+#freshness.stale { color: var(--orange); }
+#refresh-btn {
+  padding: 3px 10px;
+  background: rgba(79,156,249,.12);
+  color: var(--accent);
+  border: 1px solid var(--border2);
+  border-radius: var(--radius);
+  font-size: 11px;
+  cursor: pointer;
+  transition: var(--transition);
+}
+#refresh-btn:hover { background: rgba(79,156,249,.25); }
+#provider-dot {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 6px var(--green);
+  flex-shrink: 0;
+}
+#provider-dot.degraded { background: var(--orange); box-shadow: 0 0 6px var(--orange); }
+#provider-dot.error    { background: var(--red);    box-shadow: 0 0 6px var(--red); }
+
+/* Main grid */
+#main {
+  display: grid;
+  grid-template-columns: 220px 1fr 280px;
+  grid-template-rows: 1fr;
+  overflow: hidden;
+  height: 100%;
+}
+
+/* ── Left Column ────────────────────────────────────────────────────── */
+#left {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+}
+/* ── Center Column ──────────────────────────────────────────────────── */
+#center {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+#center-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+  flex-shrink: 0;
+}
+.tab-btn {
+  padding: 8px 14px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .5px;
+  color: var(--muted);
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  cursor: pointer;
+  transition: var(--transition);
+  white-space: nowrap;
+}
+.tab-btn:hover { color: var(--text); }
+.tab-btn.active { color: var(--accent); border-bottom-color: var(--accent); }
+#center-content {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+}
+.tab-pane {
+  position: absolute;
+  inset: 0;
+  overflow-y: auto;
+  padding: 12px;
+  display: none;
+}
+.tab-pane.active { display: block; }
+
+/* ── Right Column ───────────────────────────────────────────────────── */
+#right {
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--border);
+  overflow: hidden;
+}
+
+/* ── Shared Panel Style ─────────────────────────────────────────────── */
+.panel {
+  border-bottom: 1px solid var(--border);
+  padding: 10px 12px;
+  flex-shrink: 0;
+}
+.panel-title {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  color: var(--muted);
+  text-transform: uppercase;
+  margin-bottom: 8px;
+}
+
+/* ── Mission Status ─────────────────────────────────────────────────── */
+#mission-status .risk-level {
+  font-family: var(--font);
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1;
+  margin-bottom: 3px;
+}
+#mission-status .risk-score {
+  font-family: var(--font);
+  font-size: 13px;
+  color: var(--muted);
+}
+#mission-status .status-meta {
+  margin-top: 8px;
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.7;
+}
+#mission-status .status-meta strong { color: var(--text); }
+
+/* Risk level colors */
+.risk-LOW      { color: var(--low); }
+.risk-MODERATE { color: var(--moderate); }
+.risk-HIGH     { color: var(--high); }
+.risk-CRITICAL { color: var(--critical); }
+.risk-UNKNOWN  { color: var(--muted); }
+.bg-LOW      { background: rgba(46,204,113,.08);  border-left: 3px solid var(--low); }
+.bg-MODERATE { background: rgba(240,165,0,.08);   border-left: 3px solid var(--moderate); }
+.bg-HIGH     { background: rgba(230,126,34,.08);  border-left: 3px solid var(--high); }
+.bg-CRITICAL { background: rgba(231,76,60,.08);   border-left: 3px solid var(--critical); }
+.bg-UNKNOWN  { background: var(--surface2);       border-left: 3px solid var(--dim); }
+
+/* ── Risk Domain Cards ──────────────────────────────────────────────── */
+.domain-card {
+  border-radius: var(--radius);
+  padding: 7px 9px;
+  margin-bottom: 5px;
+  cursor: pointer;
+  transition: var(--transition);
+}
+.domain-card:hover { filter: brightness(1.15); }
+.domain-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 2px;
+}
+.domain-name {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .5px;
+  text-transform: uppercase;
+}
+.domain-badge {
+  font-family: var(--font);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .5px;
+}
+.domain-score-bar {
+  height: 3px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-top: 4px;
+}
+.domain-score-fill {
+  height: 100%;
+  border-radius: 2px;
+  transition: width .4s ease;
+}
+.domain-drivers {
+  font-size: 10px;
+  color: var(--muted);
+  margin-top: 4px;
+  line-height: 1.5;
+}
+
+/* ── Mission Profile ────────────────────────────────────────────────── */
+.profile-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 5px;
+}
+.profile-label {
+  font-size: 11px;
+  color: var(--muted);
+  width: 85px;
+  flex-shrink: 0;
+}
+.sensitivity-toggle {
+  display: flex;
+  gap: 2px;
+}
+.sens-btn {
+  padding: 2px 7px;
+  font-size: 10px;
+  font-weight: 700;
+  border: 1px solid var(--border2);
+  background: var(--surface2);
+  color: var(--muted);
+  cursor: pointer;
+  border-radius: 3px;
+  transition: var(--transition);
+  letter-spacing: .5px;
+}
+.sens-btn.active-low      { background: rgba(46,204,113,.2);  color: var(--low);      border-color: var(--low); }
+.sens-btn.active-medium   { background: rgba(240,165,0,.2);   color: var(--moderate); border-color: var(--moderate); }
+.sens-btn.active-high     { background: rgba(231,76,60,.2);   color: var(--critical); border-color: var(--critical); }
+.apply-btn {
+  width: 100%;
+  margin-top: 8px;
+  padding: 6px;
+  background: rgba(79,156,249,.12);
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: .5px;
+  cursor: pointer;
+  transition: var(--transition);
+}
+.apply-btn:hover { background: rgba(79,156,249,.25); }
+
+/* ── Telemetry Grid ─────────────────────────────────────────────────── */
+.telemetry-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+.telemetry-cell {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 7px 9px;
+}
+.telemetry-cell.unavailable { opacity: .45; }
+.tel-label { font-size: 9px; color: var(--muted); font-weight: 700; letter-spacing: .8px; text-transform: uppercase; }
+.tel-value { font-family: var(--font); font-size: 16px; font-weight: 700; color: var(--text); margin: 2px 0 1px; }
+.tel-unit  { font-size: 9px; color: var(--dim); }
+.tel-na    { font-family: var(--font); font-size: 11px; color: var(--dim); margin-top: 2px; }
+
+/* ── Domain detail explainability ───────────────────────────────────── */
+.expl-section { margin-bottom: 10px; }
+.expl-category {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 4px;
+  padding: 2px 6px;
+  background: rgba(79,156,249,.08);
+  border-radius: 3px;
+  display: inline-block;
+}
+.expl-category.analyzed  { color: #f0a500; background: rgba(240,165,0,.08); }
+.expl-category.predicted { color: #7c5cd8; background: rgba(124,92,216,.08); }
+.expl-category.correlated{ color: #2ecc71; background: rgba(46,204,113,.08); }
+.expl-category.assessment{ color: var(--text); background: var(--surface2); }
+.expl-item {
+  font-size: 11px;
+  color: var(--muted);
+  padding: 2px 0 2px 10px;
+  border-left: 2px solid var(--border2);
+  margin-bottom: 2px;
+  line-height: 1.5;
+}
+.disclaimer {
+  margin-top: 8px;
+  padding: 6px 8px;
+  background: rgba(79,156,249,.06);
+  border-radius: var(--radius);
+  border: 1px solid var(--border2);
+  font-size: 10px;
+  color: var(--muted);
+  font-style: italic;
+}
+
+/* ── Intelligence Timeline ──────────────────────────────────────────── */
+.timeline-list { list-style: none; }
+.tl-item {
+  display: flex;
+  gap: 10px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+  align-items: flex-start;
+}
+.tl-item:last-child { border-bottom: none; }
+.tl-cat {
+  flex-shrink: 0;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  padding: 2px 6px;
+  border-radius: 3px;
+  min-width: 78px;
+  text-align: center;
+}
+.cat-OBSERVED   { background: rgba(79,156,249,.15); color: var(--accent); }
+.cat-ANALYZED   { background: rgba(240,165,0,.15);  color: var(--amber); }
+.cat-PREDICTED  { background: rgba(124,92,216,.15); color: var(--accent2); }
+.cat-CORRELATED { background: rgba(46,204,113,.15); color: var(--green); }
+.cat-ASSESSMENT { background: rgba(231,76,60,.15);  color: var(--red); }
+.tl-text { font-size: 11px; color: var(--text); line-height: 1.5; }
+
+/* ── Forecast Chart ─────────────────────────────────────────────────── */
+.forecast-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+.forecast-label {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--accent);
+  padding: 2px 8px;
+  background: rgba(79,156,249,.1);
+  border-radius: 3px;
+  border: 1px solid rgba(79,156,249,.3);
+}
+.forecast-select {
+  background: var(--surface2);
+  border: 1px solid var(--border2);
+  color: var(--text);
+  border-radius: var(--radius);
+  padding: 4px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.chart-container { position: relative; height: 240px; }
+.forecast-disclaimer {
+  font-size: 10px;
+  color: var(--muted);
+  font-style: italic;
+  margin-top: 6px;
+}
+
+/* ── Event Correlation ──────────────────────────────────────────────── */
+.corr-card {
+  background: var(--surface2);
+  border: 1px solid var(--border2);
+  border-radius: var(--radius);
+  padding: 10px;
+  margin-bottom: 8px;
+}
+.corr-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: 6px;
+}
+.corr-event-type {
+  font-family: var(--font);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+.corr-score-badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 3px;
+  background: rgba(124,92,216,.15);
+  color: var(--accent2);
+  border: 1px solid rgba(124,92,216,.3);
+}
+.corr-meta {
+  font-size: 10px;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+.corr-interp {
+  font-size: 10px;
+  font-style: italic;
+  color: var(--green);
+  margin-bottom: 6px;
+}
+.corr-domains {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+.corr-domain-tag {
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: rgba(79,156,249,.1);
+  color: var(--accent);
+  border: 1px solid rgba(79,156,249,.2);
+  letter-spacing: .5px;
+}
+.corr-evidence {
+  font-size: 10px;
+  color: var(--muted);
+  border-top: 1px solid var(--border);
+  padding-top: 5px;
+  margin-top: 5px;
+  line-height: 1.6;
+}
+.score-bar-outer {
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-bottom: 6px;
+}
+.score-bar-inner {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent2), var(--accent));
+  border-radius: 2px;
+}
+
+/* ── Conversational Panel ───────────────────────────────────────────── */
+#right { padding: 0; }
+#ask-header {
+  padding: 8px 12px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+  color: var(--muted);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+#ask-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.msg { max-width: 100%; word-break: break-word; }
+.msg-q {
+  background: rgba(79,156,249,.1);
+  border: 1px solid rgba(79,156,249,.2);
+  border-radius: var(--radius);
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--accent);
+  align-self: flex-end;
+  max-width: 85%;
+}
+.msg-a {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+  font-size: 12px;
+  color: var(--text);
+  white-space: pre-wrap;
+  line-height: 1.6;
+}
+.msg-a strong { color: var(--accent); }
+.quick-questions {
+  padding: 6px 12px;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  flex-shrink: 0;
+}
+.quick-q {
+  font-size: 10px;
+  padding: 3px 8px;
+  background: var(--surface2);
+  border: 1px solid var(--border2);
+  border-radius: 3px;
+  color: var(--muted);
+  cursor: pointer;
+  transition: var(--transition);
+}
+.quick-q:hover { color: var(--text); border-color: var(--accent); }
+#ask-input-row {
+  display: flex;
+  gap: 6px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+#ask-input {
+  flex: 1;
+  background: var(--surface2);
+  border: 1px solid var(--border2);
+  border-radius: var(--radius);
+  color: var(--text);
+  padding: 6px 10px;
+  font-size: 12px;
+  outline: none;
+  transition: var(--transition);
+}
+#ask-input:focus { border-color: var(--accent); }
+#ask-send {
+  padding: 6px 12px;
+  background: rgba(79,156,249,.15);
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  font-size: 12px;
+  cursor: pointer;
+  transition: var(--transition);
+  font-weight: 700;
+}
+#ask-send:hover { background: rgba(79,156,249,.3); }
+
+/* ── Loading/Error States ───────────────────────────────────────────── */
+.loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--muted);
+  font-size: 13px;
+  gap: 8px;
+}
+.spinner {
+  width: 14px; height: 14px;
+  border: 2px solid var(--border2);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin .8s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.error-banner {
+  padding: 8px 12px;
+  background: rgba(231,76,60,.1);
+  border: 1px solid var(--red);
+  border-radius: var(--radius);
+  color: var(--red);
+  font-size: 11px;
+  margin-bottom: 8px;
+}
+.placeholder { color: var(--muted); font-size: 12px; font-style: italic; padding: 20px; text-align: center; }
+
+/* ── Recommendations ────────────────────────────────────────────────── */
+.rec-list { list-style: none; }
+.rec-item {
+  display: flex;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 11px;
+  color: var(--text);
+  border-bottom: 1px solid var(--border);
+  line-height: 1.5;
+}
+.rec-item:last-child { border-bottom: none; }
+.rec-bullet { color: var(--accent); flex-shrink: 0; }
+
+/* ── Scrollable sections ────────────────────────────────────────────── */
+.scrollable { overflow-y: auto; flex: 1; }
+</style>
+</head>
+<body>
+<div id="root">
+
+  <!-- ── Header ─────────────────────────────────────────────────────── -->
+  <div id="header">
+    <div class="logo">BOB<span>VOYAGE</span></div>
+    <div style="font-size:10px;color:var(--muted);letter-spacing:.5px;margin-top:1px">MISSION CONTROL</div>
+    <div id="provider-dot" title="Provider status"></div>
+    <div class="sep"></div>
+    <div id="freshness">—</div>
+    <div id="mode-badge" class="demo" onclick="toggleMode()" title="Click to toggle Demo/Live mode">DEMO</div>
+    <button id="refresh-btn" onclick="loadAssessment()">⟳ REFRESH</button>
+  </div>
+
+  <!-- ── Main ───────────────────────────────────────────────────────── -->
+  <div id="main">
+
+    <!-- Left Column -->
+    <div id="left">
+
+      <!-- Mission Status -->
+      <div class="panel" id="mission-status">
+        <div class="panel-title">Mission Status</div>
+        <div class="risk-level risk-UNKNOWN" id="status-level">—</div>
+        <div class="risk-score" id="status-score">— / 100</div>
+        <div class="status-meta" id="status-meta">
+          <div>Loading…</div>
+        </div>
+      </div>
+
+      <!-- Risk Domains -->
+      <div class="panel" style="flex:1;overflow-y:auto;">
+        <div class="panel-title">Risk Domains</div>
+        <div id="domains-list">
+          <div class="loading"><div class="spinner"></div></div>
+        </div>
+      </div>
+
+      <!-- Mission Profile -->
+      <div class="panel" id="profile-panel">
+        <div class="panel-title">Mission Profile</div>
+        <div id="profile-rows"></div>
+        <button class="apply-btn" onclick="applyProfile()">APPLY PROFILE</button>
+      </div>
+
+    </div><!-- /left -->
+
+    <!-- Center Column -->
+    <div id="center">
+      <div id="center-tabs">
+        <button class="tab-btn active" onclick="switchTab('telemetry')">TELEMETRY</button>
+        <button class="tab-btn"        onclick="switchTab('forecast')">FORECAST</button>
+        <button class="tab-btn"        onclick="switchTab('why')">WHY HIGH?</button>
+        <button class="tab-btn"        onclick="switchTab('events')">EVENTS</button>
+        <button class="tab-btn"        onclick="switchTab('timeline')">TIMELINE</button>
+        <button class="tab-btn"        onclick="switchTab('recs')">ACTIONS</button>
+      </div>
+      <div id="center-content">
+
+        <!-- TELEMETRY TAB -->
+        <div class="tab-pane active" id="tab-telemetry">
+          <div class="panel-title" style="margin-bottom:10px;">Space Weather Telemetry</div>
+          <div class="telemetry-grid" id="telemetry-grid">
+            <div class="loading" style="grid-column:1/-1;height:80px"><div class="spinner"></div></div>
+          </div>
+        </div>
+
+        <!-- FORECAST TAB -->
+        <div class="tab-pane" id="tab-forecast">
+          <div class="forecast-controls">
+            <div class="forecast-label">AI FORECAST</div>
+            <select class="forecast-select" id="forecast-param-select" onchange="renderForecastChart()">
+            </select>
+          </div>
+          <div class="chart-container">
+            <canvas id="forecast-canvas"></canvas>
+          </div>
+          <div class="forecast-disclaimer">
+            Forecast generated by Holt Double Exponential Smoothing. Shaded area shows ±1σ prediction interval.
+            This is a short-term statistical projection — not a guaranteed outcome.
+          </div>
+        </div>
+
+        <!-- WHY HIGH TAB -->
+        <div class="tab-pane" id="tab-why">
+          <div style="display:flex;gap:8px;margin-bottom:12px;flex-wrap:wrap;" id="why-domain-tabs"></div>
+          <div id="why-content"><div class="placeholder">Select a domain above</div></div>
+        </div>
+
+        <!-- EVENTS TAB -->
+        <div class="tab-pane" id="tab-events">
+          <div class="panel-title" style="margin-bottom:10px;">Event Correlation — NASA DONKI + NOAA</div>
+          <div id="events-list"><div class="loading"><div class="spinner"></div></div></div>
+        </div>
+
+        <!-- TIMELINE TAB -->
+        <div class="tab-pane" id="tab-timeline">
+          <div class="panel-title" style="margin-bottom:10px;">Intelligence Timeline</div>
+          <ul class="timeline-list" id="timeline-list">
+            <div class="loading"><div class="spinner"></div></div>
+          </ul>
+        </div>
+
+        <!-- ACTIONS TAB -->
+        <div class="tab-pane" id="tab-recs">
+          <div class="panel-title" style="margin-bottom:10px;">Recommended Actions</div>
+          <ul class="rec-list" id="rec-list">
+            <div class="loading"><div class="spinner"></div></div>
+          </ul>
+        </div>
+
+      </div>
+    </div><!-- /center -->
+
+    <!-- Right Column — Conversational Panel -->
+    <div id="right">
+      <div id="ask-header">ASK BOBVOYAGE</div>
+      <div id="ask-messages">
+        <div class="msg-a">
+Hello, operator. I am <strong>BobVoyage</strong> — your Space Weather Intelligence Copilot.
+
+Ask me anything about current space-weather conditions, mission risk, detected anomalies, forecasts, or correlated events.
+        </div>
+      </div>
+      <div class="quick-questions">
+        <span class="quick-q" onclick="askQuestion('What is happening right now?')">Status?</span>
+        <span class="quick-q" onclick="askQuestion('Why is the risk high?')">Why high?</span>
+        <span class="quick-q" onclick="askQuestion('What changed recently?')">Changed?</span>
+        <span class="quick-q" onclick="askQuestion('What is predicted next?')">Forecast?</span>
+        <span class="quick-q" onclick="askQuestion('Are there any external events?')">Events?</span>
+        <span class="quick-q" onclick="askQuestion('What should operators monitor?')">Actions?</span>
+      </div>
+      <div id="ask-input-row">
+        <input id="ask-input" type="text" placeholder="Ask BobVoyage…"
+               onkeydown="if(event.key==='Enter')askQuestion()">
+        <button id="ask-send" onclick="askQuestion()">→</button>
+      </div>
+    </div><!-- /right -->
+
+  </div><!-- /main -->
+</div><!-- /root -->
+
+<script>
+/* ═══════════════════════════════════════════════════════════════════════
+   BobVoyage Mission Control — Frontend
+   ═══════════════════════════════════════════════════════════════════════ */
+
+const API = '';   // same origin
+let _assessment   = null;
+let _mode         = 'demo';
+let _forecastChart = null;
+let _refreshTimer = null;
+let _ageTimer     = null;
+let _retrievedAt  = null;
+let _selectedDomain = null;
+let _missionProfile = {
+  radiation_sensitivity:       'medium',
+  communications_sensitivity:  'medium',
+  navigation_sensitivity:      'medium',
+  power_sensitivity:           'low',
+  attitude_control_sensitivity:'medium',
+};
+
+// ── Risk level helpers ──────────────────────────────────────────────────
+const LEVEL_COLOR = { LOW:'#2ecc71', MODERATE:'#f0a500', HIGH:'#e67e22', CRITICAL:'#e74c3c', UNKNOWN:'#606880' };
+
+function riskClass(level) { return 'risk-' + (level || 'UNKNOWN'); }
+function bgClass(level)   { return 'bg-'   + (level || 'UNKNOWN'); }
+function levelColor(level){ return LEVEL_COLOR[level] || LEVEL_COLOR.UNKNOWN; }
+
+// ── Mode ────────────────────────────────────────────────────────────────
+function toggleMode() {
+  _mode = _mode === 'demo' ? 'live' : 'demo';
+  document.getElementById('mode-badge').textContent = _mode.toUpperCase();
+  document.getElementById('mode-badge').className = 'demo'; // visual only; actual switch via API
+  if (_mode === 'live') document.getElementById('mode-badge').className = 'live';
+  loadAssessment();
+}
+
+// ── Freshness timer ──────────────────────────────────────────────────────
+function startAgeTimer() {
+  if (_ageTimer) clearInterval(_ageTimer);
+  _ageTimer = setInterval(() => {
+    if (!_retrievedAt) return;
+    const ageSec = Math.floor((Date.now() - new Date(_retrievedAt).getTime()) / 1000);
+    const el = document.getElementById('freshness');
+    const isStale = _assessment && _assessment.is_stale;
+    el.textContent = isStale ? `STALE  ${fmtAge(ageSec)}` : fmtAge(ageSec);
+    el.className = isStale ? 'stale' : '';
+  }, 1000);
+}
+
+function fmtAge(s) {
+  if (s < 60)   return `${s}s old`;
+  if (s < 3600) return `${Math.floor(s/60)}m ${s%60}s old`;
+  return `${Math.floor(s/3600)}h ${Math.floor((s%3600)/60)}m old`;
+}
+
+// ── Load assessment ──────────────────────────────────────────────────────
+async function loadAssessment() {
+  try {
+    const res  = await fetch(`${API}/api/assessment?mode=${_mode}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    _assessment  = data;
+    _retrievedAt = data.retrieved_at || new Date().toISOString();
+    startAgeTimer();
+    renderAll(data);
+    setProviderDot(data.provider_status || 'ok');
+  } catch(err) {
+    console.error('Assessment load failed:', err);
+    showGlobalError(err.message);
+  }
+}
+
+function setProviderDot(status) {
+  const el = document.getElementById('provider-dot');
+  el.className = status === 'ok' ? '' : status === 'degraded' ? 'degraded' : 'error';
+}
+
+// ── Render all panels ────────────────────────────────────────────────────
+function renderAll(data) {
+  renderStatus(data);
+  renderDomains(data);
+  renderProfile();
+  renderTelemetry(data);
+  renderForecastSelects(data);
+  renderForecastChart();
+  renderWhyDomainTabs(data);
+  renderEvents(data);
+  renderTimeline(data);
+  renderRecs(data);
+}
+
+// ── Mission Status ───────────────────────────────────────────────────────
+function renderStatus(data) {
+  const risk  = data.risk || {};
+  const level = risk.level || 'UNKNOWN';
+  const score = risk.score != null ? risk.score : '—';
+  document.getElementById('status-level').textContent = level;
+  document.getElementById('status-level').className = `risk-level ${riskClass(level)}`;
+  document.getElementById('status-score').textContent = `${score} / 100`;
+  const meta = document.getElementById('status-meta');
+  const src  = data.source || '—';
+  const age  = data.data_age_label || '—';
+  const stale = data.is_stale ? '<span style="color:var(--orange)"> STALE</span>' : '';
+  meta.innerHTML = `
+    <div><strong>Source:</strong> ${src}${stale}</div>
+    <div><strong>Mode:</strong> ${(data.mode||'demo').toUpperCase()}</div>
+    <div><strong>Data age:</strong> ${age}</div>
+    <div><strong>Pipeline:</strong> ${data.pipeline_ms||'—'}ms</div>
+  `;
+}
+
+// ── Risk Domains ─────────────────────────────────────────────────────────
+function renderDomains(data) {
+  const domains = (data.risk || {}).domains || [];
+  const el = document.getElementById('domains-list');
+  if (!domains.length) { el.innerHTML = '<div class="placeholder">No domain data</div>'; return; }
+  el.innerHTML = domains.map(d => {
+    const level = d.risk || 'UNKNOWN';
+    const score = d.score || 0;
+    const envScore  = d.score_environmental != null ? d.score_environmental : score;
+    const corrScore = d.score_correlation  || 0;
+    const label = d.domain.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase());
+    const drivers = (d.drivers || []).slice(0,2).map(dr => {
+      return `<div>· ${dr.replace(/^(OBSERVED|ANALYZED|PREDICTED|CORRELATED):\s*/,'')}</div>`;
+    }).join('');
+    const fillPct = Math.min(100, score);
+    return `
+      <div class="domain-card ${bgClass(level)}" onclick="showWhyDomain('${d.domain}')">
+        <div class="domain-header">
+          <div class="domain-name">${label}</div>
+          <div class="domain-badge ${riskClass(level)}">${level} — ${score.toFixed(0)}</div>
+        </div>
+        <div class="domain-score-bar">
+          <div class="domain-score-fill" style="width:${fillPct}%;background:${levelColor(level)}"></div>
+        </div>
+        ${corrScore > 0 ? `<div style="font-size:9px;color:var(--accent2);margin-top:3px;">+${corrScore.toFixed(1)} from events</div>` : ''}
+        <div class="domain-drivers">${drivers}</div>
+      </div>`;
+  }).join('');
+}
+
+// ── Mission Profile ──────────────────────────────────────────────────────
+const PROFILE_KEYS = [
+  ['radiation_sensitivity',      'Radiation'],
+  ['communications_sensitivity', 'Comms'],
+  ['navigation_sensitivity',     'Navigation'],
+  ['power_sensitivity',          'Power'],
+  ['attitude_control_sensitivity','Attitude'],
+];
+
+function renderProfile() {
+  const el = document.getElementById('profile-rows');
+  el.innerHTML = PROFILE_KEYS.map(([key, label]) => {
+    const val = _missionProfile[key] || 'medium';
+    return `
+      <div class="profile-row">
+        <div class="profile-label">${label}</div>
+        <div class="sensitivity-toggle">
+          ${['low','medium','high'].map(lvl => `
+            <button class="sens-btn ${val===lvl?'active-'+lvl:''}"
+                    onclick="setSensitivity('${key}','${lvl}',this)">${lvl.toUpperCase()[0]}</button>
+          `).join('')}
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function setSensitivity(key, val, btn) {
+  _missionProfile[key] = val;
+  renderProfile();
+}
+
+async function applyProfile() {
+  try {
+    const res = await fetch(`${API}/api/assess`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ mission_profile: _missionProfile, mode: _mode }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    _assessment  = data;
+    _retrievedAt = data.retrieved_at;
+    renderAll(data);
+    setProviderDot(data.provider_status || 'ok');
+  } catch(err) {
+    console.error('Profile apply failed:', err);
+  }
+}
+
+// ── Telemetry ────────────────────────────────────────────────────────────
+function renderTelemetry(data) {
+  const telemetry = data.telemetry || [];
+  const el = document.getElementById('telemetry-grid');
+  if (!telemetry.length) { el.innerHTML = '<div class="placeholder">No telemetry</div>'; return; }
+  el.innerHTML = telemetry.map(t => {
+    if (!t.available) {
+      return `
+        <div class="telemetry-cell unavailable">
+          <div class="tel-label">${t.label}</div>
+          <div class="tel-na">unavailable</div>
+        </div>`;
+    }
+    const fmt = fmtValue(t.value, t.param);
+    return `
+      <div class="telemetry-cell">
+        <div class="tel-label">${t.label}</div>
+        <div class="tel-value">${fmt}</div>
+        <div class="tel-unit">${t.unit}</div>
+      </div>`;
+  }).join('');
+}
+
+function fmtValue(val, param) {
+  if (val == null) return '—';
+  if (['xray_flux','proton_flux'].includes(param)) return val.toExponential(2);
+  if (param === 'geomagnetic_index') return val.toFixed(1);
+  if (param === 'solar_wind_speed') return val.toFixed(0);
+  return val.toFixed(1);
+}
+
+// ── Forecast Chart ───────────────────────────────────────────────────────
+function renderForecastSelects(data) {
+  const params = data.forecast_params || [];
+  const sel = document.getElementById('forecast-param-select');
+  const meta = data.param_meta || {};
+  sel.innerHTML = params.map(p => {
+    const label = meta[p] ? meta[p].label : p;
+    return `<option value="${p}">${label}</option>`;
+  }).join('');
+}
+
+function renderForecastChart() {
+  if (!_assessment) return;
+  const sel = document.getElementById('forecast-param-select');
+  const param = sel.value || ((_assessment.forecast_params||[])[0]);
+  if (!param) return;
+
+  const byParam  = _assessment.forecast_by_param || {};
+  const steps    = byParam[param] || [];
+  const meta     = (_assessment.param_meta || {})[param] || { label: param, unit: '' };
+  const current  = (_assessment.conditions || {})[param];
+
+  const labels      = [];
+  const predictions = [];
+  const lowers      = [];
+  const uppers      = [];
+
+  // Insert current value as step 0
+  if (current != null) {
+    labels.push('NOW');
+    predictions.push(current);
+    lowers.push(current);
+    uppers.push(current);
+  }
+
+  steps.forEach((s, i) => {
+    labels.push(`+${(i+1)*5}m`);
+    predictions.push(s.predicted_value);
+    lowers.push(s.lower_bound);
+    uppers.push(s.upper_bound);
+  });
+
+  const ctx = document.getElementById('forecast-canvas').getContext('2d');
+  if (_forecastChart) _forecastChart.destroy();
+
+  _forecastChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels,
+      datasets: [
+        {
+          label: meta.label,
+          data: predictions,
+          borderColor: '#4f9cf9',
+          backgroundColor: 'transparent',
+          borderWidth: 2,
+          pointRadius: 2,
+          tension: 0.3,
+          order: 1,
+        },
+        {
+          label: 'Upper bound',
+          data: uppers,
+          borderColor: 'rgba(79,156,249,.2)',
+          backgroundColor: 'rgba(79,156,249,.08)',
+          borderWidth: 1,
+          borderDash: [4,4],
+          pointRadius: 0,
+          fill: '+1',
+          tension: 0.3,
+          order: 2,
+        },
+        {
+          label: 'Lower bound',
+          data: lowers,
+          borderColor: 'rgba(79,156,249,.2)',
+          backgroundColor: 'rgba(79,156,249,.08)',
+          borderWidth: 1,
+          borderDash: [4,4],
+          pointRadius: 0,
+          fill: false,
+          tension: 0.3,
+          order: 3,
+        },
+      ],
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: { duration: 300 },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          mode: 'index',
+          intersect: false,
+          backgroundColor: '#191d26',
+          borderColor: '#2e364a',
+          borderWidth: 1,
+          titleColor: '#d4d9e8',
+          bodyColor: '#8891aa',
+          callbacks: {
+            label: ctx => {
+              const v = ctx.raw;
+              if (v == null) return '';
+              const unit = meta.unit || '';
+              return ` ${ctx.dataset.label}: ${typeof v === 'number' ? v.toPrecision(4) : v} ${unit}`;
+            }
+          }
+        }
+      },
+      scales: {
+        x: {
+          ticks: { color: '#606880', font: { size: 10 } },
+          grid:  { color: '#1c2030' },
+        },
+        y: {
+          ticks: { color: '#606880', font: { size: 10 } },
+          grid:  { color: '#1c2030' },
+        }
+      }
+    }
+  });
+}
+
+// ── Why Domain Tabs ──────────────────────────────────────────────────────
+function renderWhyDomainTabs(data) {
+  const domains = (data.risk || {}).domains || [];
+  const el = document.getElementById('why-domain-tabs');
+  el.innerHTML = domains.map(d => {
+    const level = d.risk || 'UNKNOWN';
+    const label = d.domain.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase());
+    return `<button onclick="showWhyDomain('${d.domain}')" style="
+      padding:5px 12px; border-radius:var(--radius); font-size:11px; font-weight:700;
+      cursor:pointer; border:1px solid ${levelColor(level)}; color:${levelColor(level)};
+      background:${levelColor(level)}22; transition:var(--transition);">
+      ${label} — ${level}
+    </button>`;
+  }).join('');
+
+  // Auto-show highest risk domain
+  if (!_selectedDomain && domains.length) {
+    const highest = domains.reduce((a,b) => (b.score||0) > (a.score||0) ? b : a, domains[0]);
+    showWhyDomain(highest.domain);
+  }
+}
+
+function showWhyDomain(domainName) {
+  _selectedDomain = domainName;
+  switchTab('why');
+  if (!_assessment) return;
+
+  const domains = (_assessment.risk || {}).domains || [];
+  const domain  = domains.find(d => d.domain === domainName);
+  const evidence = _assessment.evidence || {};
+  const profile  = _assessment.mission_profile || {};
+  const el = document.getElementById('why-content');
+
+  if (!domain) { el.innerHTML = '<div class="placeholder">Domain not found</div>'; return; }
+
+  const level = domain.risk || 'UNKNOWN';
+  const score = domain.score || 0;
+  const label = domainName.replace(/_/g,' ').replace(/\b\w/g,c=>c.toUpperCase());
+  const sensKey = domainName + '_sensitivity';
+  const sensitivity = profile[sensKey] || 'medium';
+
+  // Group drivers by category
+  const obs  = domain.drivers.filter(d => d.startsWith('OBSERVED:'));
+  const ana  = domain.drivers.filter(d => d.startsWith('ANALYZED:'));
+  const pred = domain.drivers.filter(d => d.startsWith('PREDICTED:'));
+  const corr = domain.drivers.filter(d => d.startsWith('CORRELATED:'));
+
+  function section(catLabel, items, cssClass) {
+    if (!items.length) return '';
+    const itemsHtml = items.map(t =>
+      `<div class="expl-item">${t.replace(/^(OBSERVED|ANALYZED|PREDICTED|CORRELATED):\s*/,'')}</div>`
+    ).join('');
+    return `<div class="expl-section">
+      <div class="expl-category ${cssClass}">${catLabel}</div>
+      ${itemsHtml}
+    </div>`;
+  }
+
+  el.innerHTML = `
+    <div style="margin-bottom:12px;">
+      <div style="font-size:18px;font-weight:700;font-family:var(--font);color:${levelColor(level)};margin-bottom:3px;">
+        ${label.toUpperCase()} — ${level}
+      </div>
+      <div style="font-size:12px;color:var(--muted);">
+        Total score: ${score}/100 &nbsp;·&nbsp;
+        Environmental: ${domain.score_environmental || 0}/100 &nbsp;·&nbsp;
+        Correlation: +${domain.score_correlation || 0}
+      </div>
+    </div>
+    ${section('OBSERVED', obs, '')}
+    ${section('ANALYZED', ana, 'analyzed')}
+    ${section('PREDICTED', pred, 'predicted')}
+    ${section('CORRELATED', corr, 'correlated')}
+    <div class="expl-section">
+      <div class="expl-category">MISSION PROFILE</div>
+      <div class="expl-item">${label} sensitivity: ${sensitivity.toUpperCase()}</div>
+    </div>
+    <div class="expl-section">
+      <div class="expl-category assessment">FINAL ASSESSMENT</div>
+      <div class="expl-item" style="color:${levelColor(level)};font-weight:700;">${level} — ${score}/100</div>
+    </div>
+    <div class="disclaimer">
+      ⚠ Risk score is a decision-support score.
+      It is NOT a probability of spacecraft failure.
+      BobVoyage provides intelligence for human operators to evaluate.
+    </div>
+  `;
+}
+
+// ── Events ───────────────────────────────────────────────────────────────
+function renderEvents(data) {
+  const corrs = data.correlated_events || [];
+  const el = document.getElementById('events-list');
+
+  if (!corrs.length) {
+    // Show raw events if no correlations
+    const events = data.events || [];
+    if (!events.length) {
+      el.innerHTML = '<div class="placeholder">No space-weather events detected in the analysis window</div>';
+      return;
+    }
+    el.innerHTML = events.map(e => `
+      <div class="corr-card">
+        <div class="corr-header">
+          <div class="corr-event-type">${e.event_type || 'EVENT'}</div>
+          <div class="corr-score-badge">NO CORRELATION</div>
+        </div>
+        <div class="corr-meta">${e.event_time || '—'} · ${e.source || '—'}</div>
+        <div class="corr-meta">${e.description || ''}</div>
+      </div>`).join('');
+    return;
+  }
+
+  el.innerHTML = corrs.map(ce => {
+    const domains = (ce.affected_domains || []).map(d =>
+      `<span class="corr-domain-tag">${d.replace(/_/g,' ').toUpperCase()}</span>`
+    ).join('');
+    const evidence = (ce.evidence || []).map(e =>
+      `<div>· ${e}</div>`
+    ).join('');
+    const interp = (ce.interpretation || '').replace(/_/g,' ');
+    const score  = ce.correlation_score || 0;
+    const pct    = Math.round(score * 100);
+
+    return `
+      <div class="corr-card">
+        <div class="corr-header">
+          <div class="corr-event-type">${ce.event_type}</div>
+          <div class="corr-score-badge">SCORE ${score.toFixed(2)}</div>
+        </div>
+        <div class="score-bar-outer">
+          <div class="score-bar-inner" style="width:${pct}%"></div>
+        </div>
+        <div class="corr-meta">
+          ${ce.event_time || '—'}
+          ${ce.event_id ? '· ID: ' + ce.event_id : ''}
+          · ${ce.observations_in_window || 0} obs in window
+        </div>
+        <div class="corr-interp">↳ ${interp}</div>
+        <div class="corr-domains">${domains}</div>
+        <div class="corr-evidence">${evidence}</div>
+      </div>`;
+  }).join('');
+}
+
+// ── Timeline ─────────────────────────────────────────────────────────────
+function renderTimeline(data) {
+  const tl = data.timeline || [];
+  const el = document.getElementById('timeline-list');
+  if (!tl.length) { el.innerHTML = '<div class="placeholder">No timeline data</div>'; return; }
+  el.innerHTML = tl.map(item => `
+    <li class="tl-item">
+      <span class="tl-cat cat-${item.category}">${item.category}</span>
+      <span class="tl-text">${item.text}</span>
+    </li>`).join('');
+}
+
+// ── Recommendations ──────────────────────────────────────────────────────
+function renderRecs(data) {
+  const recs = data.recommendations || [];
+  const el   = document.getElementById('rec-list');
+  if (!recs.length) { el.innerHTML = '<div class="placeholder">No recommendations — conditions nominal</div>'; return; }
+  el.innerHTML = recs.map(r => `
+    <li class="rec-item">
+      <span class="rec-bullet">›</span>
+      <span>${r}</span>
+    </li>`).join('');
+}
+
+// ── Tab switching ────────────────────────────────────────────────────────
+function switchTab(name) {
+  document.querySelectorAll('.tab-pane').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById(`tab-${name}`).classList.add('active');
+  const btnMap = { telemetry:0, forecast:1, why:2, events:3, timeline:4, recs:5 };
+  const btns = document.querySelectorAll('.tab-btn');
+  if (btnMap[name] != null) btns[btnMap[name]].classList.add('active');
+  if (name === 'forecast') {
+    setTimeout(renderForecastChart, 50);
+  }
+  if (name === 'why' && _assessment) {
+    renderWhyDomainTabs(_assessment);
+    if (_selectedDomain) showWhyDomain(_selectedDomain);
+  }
+}
+
+// ── Conversational panel ─────────────────────────────────────────────────
+async function askQuestion(question) {
+  const input = document.getElementById('ask-input');
+  const q = (question || input.value || '').trim();
+  if (!q) return;
+  input.value = '';
+
+  const msgs = document.getElementById('ask-messages');
+  msgs.innerHTML += `<div class="msg msg-q">${escHtml(q)}</div>`;
+  msgs.innerHTML += `<div class="msg msg-a thinking" id="thinking"><div class="spinner"></div></div>`;
+  msgs.scrollTop = msgs.scrollHeight;
+
+  try {
+    const res = await fetch(`${API}/api/ask`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ question: q, mode: _mode }),
+    });
+    const data = await res.json();
+    const answer = data.answer || 'No response received.';
+
+    document.getElementById('thinking')?.remove();
+    msgs.innerHTML += `<div class="msg msg-a">${renderMarkdown(answer)}</div>`;
+    msgs.scrollTop = msgs.scrollHeight;
+  } catch(err) {
+    document.getElementById('thinking')?.remove();
+    msgs.innerHTML += `<div class="msg msg-a" style="color:var(--red)">Error: ${escHtml(err.message)}</div>`;
+    msgs.scrollTop = msgs.scrollHeight;
+  }
+}
+
+// ── Error display ────────────────────────────────────────────────────────
+function showGlobalError(msg) {
+  const el = document.getElementById('status-level');
+  el.textContent = 'ERROR';
+  el.className = 'risk-level risk-UNKNOWN';
+  document.getElementById('status-score').textContent = '—';
+  document.getElementById('status-meta').innerHTML = `
+    <div class="error-banner">⚠ ${escHtml(msg)}</div>
+    <div style="font-size:11px;color:var(--muted);">Retrying in 10s…</div>`;
+}
+
+// ── Utilities ────────────────────────────────────────────────────────────
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function renderMarkdown(text) {
+  // Minimal: bold, newlines — no full markdown parser needed
+  return escHtml(text)
+    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+    .replace(/\n/g, '<br>');
+}
+
+// ── Auto-refresh ─────────────────────────────────────────────────────────
+function startAutoRefresh(intervalMs) {
+  if (_refreshTimer) clearInterval(_refreshTimer);
+  _refreshTimer = setInterval(loadAssessment, intervalMs);
+}
+
+// ── Boot ─────────────────────────────────────────────────────────────────
+(async function boot() {
+  // Detect mode from server
+  try {
+    const res  = await fetch(`${API}/api/status`);
+    const data = await res.json();
+    const serverMode = (data.mode || 'local') === 'local' ? 'demo' : 'live';
+    _mode = serverMode;
+    const badge = document.getElementById('mode-badge');
+    badge.textContent = _mode.toUpperCase();
+    badge.className = _mode;
+  } catch(_) {}
+
+  await loadAssessment();
+  startAutoRefresh(60_000);  // auto-refresh every 60s
+})();
+</script>
+</body>
+</html>
