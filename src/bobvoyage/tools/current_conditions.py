@@ -1,8 +1,15 @@
 """
 get_current_conditions — BobVoyage MCP tool
 
-Retrieves the most recent space-weather observation from the local CSV dataset.
-Returns a structured dict with all available measurement fields.
+Retrieves the most recent space-weather observation.
+
+Provider selection:
+  • When ``dataset_path`` is explicitly supplied (or BOBVOYAGE_DATA_PROVIDER
+    is "local" / unset), the original CSV path is used directly — this keeps
+    all existing tests deterministic with zero network dependency.
+  • When BOBVOYAGE_DATA_PROVIDER is set to "noaa" or another live provider,
+    the request is delegated to the provider layer and the canonical
+    SpaceWeatherObservation is returned in the same dict schema.
 
 Responsibility: data retrieval ONLY.
 No prediction, anomaly detection, or risk assessment is performed here.
@@ -34,25 +41,81 @@ _EXPECTED_COLUMNS = {
     "geomagnetic_index",
 }
 
+_PROVIDER_ENV = "BOBVOYAGE_DATA_PROVIDER"
+
+
+def _use_provider_layer(dataset_path: str | Path | None) -> bool:
+    """Return True when the request should be routed through the provider layer."""
+    if dataset_path is not None:
+        return False   # explicit path → always use CSV directly
+    active = os.environ.get(_PROVIDER_ENV, "local").lower().strip()
+    return active not in ("local", "")
+
+
+def _from_provider() -> dict[str, Any]:
+    """Delegate to the active provider and normalise the response to the tool schema."""
+    from bobvoyage.data.factory import get_provider
+    provider = get_provider()
+    resp     = provider.get_current_conditions()
+
+    if resp.status == "error":
+        return {
+            "status":        "error",
+            "source":        resp.source,
+            "observation":   None,
+            "missing_fields": [],
+            "data_age_seconds": None,
+            "is_stale":      False,
+            "message":       resp.message,
+        }
+
+    obs = resp.observation
+    observation: dict[str, Any] = obs.to_dict() if obs else {}
+
+    # Determine which expected fields are absent from the provider response
+    missing = sorted(
+        f for f in _EXPECTED_COLUMNS
+        if observation.get(f) is None and f != "timestamp"
+    )
+
+    return {
+        "status":           resp.status,
+        "source":           resp.source,
+        "observation":      observation,
+        "missing_fields":   missing,
+        "data_age_seconds": obs.data_age_seconds if obs else None,
+        "is_stale":         obs.is_stale          if obs else False,
+        "message":          resp.message,
+    }
+
 
 def get_current_conditions(dataset_path: str | Path | None = None) -> dict[str, Any]:
-    """Return the most recent space-weather observation from the local dataset.
+    """Return the most recent space-weather observation.
 
     Parameters
     ----------
     dataset_path:
         Optional override for the CSV file location.
         Defaults to ``data/space_weather.csv`` at the project root.
+        When set, always reads from the local CSV regardless of
+        BOBVOYAGE_DATA_PROVIDER.
 
     Returns
     -------
     dict with keys:
-        status          – "ok" | "error"
-        source          – absolute path of the dataset used
-        observation     – dict of measurement fields (None when unavailable)
-        missing_fields  – list of expected fields absent from the dataset
-        message         – human-readable status message
+        status            – "ok" | "degraded" | "error"
+        source            – path or provider name
+        observation       – dict of measurement fields (None when unavailable)
+        missing_fields    – list of expected fields absent from the observation
+        data_age_seconds  – age of the observation in seconds (live providers)
+        is_stale          – True if observation exceeds freshness threshold
+        message           – human-readable status message
     """
+    # --- route to provider layer if configured --------------------------------
+    if _use_provider_layer(dataset_path):
+        return _from_provider()
+
+    # --- original CSV path -------------------------------------------------------
     path = Path(dataset_path) if dataset_path else _DEFAULT_DATASET
 
     # --- validate file exists -------------------------------------------------
@@ -139,9 +202,11 @@ def get_current_conditions(dataset_path: str | Path | None = None) -> dict[str, 
             observation[field] = None
 
     return {
-        "status": "ok",
-        "source": str(path),
-        "observation": observation,
-        "missing_fields": missing_fields,
-        "message": "Most recent observation retrieved successfully.",
+        "status":           "ok",
+        "source":           str(path),
+        "observation":      observation,
+        "missing_fields":   missing_fields,
+        "data_age_seconds": None,
+        "is_stale":         False,
+        "message":          "Most recent observation retrieved successfully.",
     }

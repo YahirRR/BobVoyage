@@ -1,3 +1,5 @@
 mcp>=1.0.0
 pandas>=2.0.0
 pytest>=8.0.0
+# requests is intentionally NOT listed — all HTTP uses stdlib urllib
+# to minimise external dependencies in the data layer.
