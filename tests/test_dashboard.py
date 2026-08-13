@@ -67,7 +67,9 @@ from bobvoyage.dashboard.service import (
     _build_timeline,
     _build_telemetry,
     _build_conversational_response,
+    _build_risk_assessment_from_context,
     _PARAM_META,
+    _AUDIENCE_KEYWORDS,
 )
 
 # ── FastAPI test client ─────────────────────────────────────────────────
@@ -438,3 +440,248 @@ class TestServiceHelpers:
         }
         response = _build_conversational_response("Are there any external events?", assessment)
         assert "no" in response.lower() or "none" in response.lower() or "not" in response.lower()
+
+
+# ===========================================================================
+# ask_question — recurrence intent
+# ===========================================================================
+class TestAskQuestionRecurrence:
+    """Tests for the new 'recurrence' conversational intent."""
+
+    @pytest.fixture(scope="class")
+    def assessment(self):
+        return get_assessment(mode="demo")
+
+    def _recurrence_answer(self, assessment, question: str) -> str:
+        result = ask_question(question, assessment)
+        return result["answer"]
+
+    def test_recurrence_keyword_returns_answer(self, assessment):
+        answer = self._recurrence_answer(assessment, "recurrence forecast for active regions?")
+        assert isinstance(answer, str) and len(answer) > 10
+
+    def test_recurrence_answer_non_empty(self, assessment):
+        answer = self._recurrence_answer(assessment, "Are there any active regions about to return?")
+        assert len(answer) > 0
+
+    def test_recurrence_answer_mentions_region_or_no_regions(self, assessment):
+        """Response must mention an active region or explain none found."""
+        answer = self._recurrence_answer(assessment, "recurrence")
+        assert (
+            "AR " in answer
+            or "active region" in answer.lower()
+            or "no active" in answer.lower()
+        )
+
+    def test_recurrence_no_causal_language(self, assessment):
+        forbidden = ["caused", "due to", "resulted in", "was triggered by", "led to"]
+        answer = self._recurrence_answer(assessment, "recurrence forecast")
+        for phrase in forbidden:
+            assert phrase not in answer.lower(), (
+                f"Causal phrase '{phrase}' found in recurrence answer"
+            )
+
+    def test_rotate_keyword_triggers_recurrence(self, assessment):
+        answer = self._recurrence_answer(assessment, "which regions will rotate back?")
+        assert len(answer) > 0
+
+    def test_active_region_keyword_triggers_recurrence(self, assessment):
+        answer = self._recurrence_answer(assessment, "any active region coming back?")
+        assert len(answer) > 0
+
+    def test_recurrence_response_is_string(self, assessment):
+        result = ask_question("recurrence", assessment)
+        assert isinstance(result["answer"], str)
+
+    def test_recurrence_answer_has_epistemic_prefix_or_fallback(self, assessment):
+        """Answer should use epistemic prefixes or a fallback message.
+        The question uses 'recurrence' as the trigger keyword (no 'forecast' overlap)."""
+        answer = self._recurrence_answer(assessment, "recurrence for active regions?")
+        has_prefix = any(
+            p in answer for p in ("OBSERVED:", "ANALYZED:", "PROJECTED:", "No active")
+        )
+        assert has_prefix, f"Expected epistemic prefix or fallback. Got: {answer[:200]}"
+
+
+# ===========================================================================
+# ask_question — briefing intent
+# ===========================================================================
+class TestAskQuestionBriefing:
+    """Tests for the new 'briefing' conversational intent across all 4 audiences."""
+
+    @pytest.fixture(scope="class")
+    def assessment(self):
+        return get_assessment(mode="demo")
+
+    @pytest.mark.parametrize("question,expected_label", [
+        ("Brief me as an astronaut",                  "Astronaut"),
+        ("Brief me as a satellite operator",          "Satellite Operator"),
+        ("Give me a briefing for aviation",           "Aviation"),
+        ("Explain the situation for the power grid",  "Power Grid"),
+    ])
+    def test_briefing_all_audiences_return_answer(self, assessment, question, expected_label):
+        result = ask_question(question, assessment)
+        assert result["status"] if "status" in result else True  # ask_question doesn't add status
+        assert isinstance(result["answer"], str) and len(result["answer"]) > 10
+
+    @pytest.mark.parametrize("question", [
+        "Brief me as an astronaut",
+        "Brief me as a satellite operator",
+        "Give me a briefing for aviation",
+        "Explain the situation for the power grid",
+    ])
+    def test_briefing_mentions_space_weather_or_risk(self, assessment, question):
+        result = ask_question(question, assessment)
+        answer_lower = result["answer"].lower()
+        assert (
+            "risk" in answer_lower
+            or "space" in answer_lower
+            or "weather" in answer_lower
+            or "radiation" in answer_lower
+            or "communication" in answer_lower
+        ), f"Expected risk/space context in: {result['answer'][:200]}"
+
+    def test_briefing_keyword_triggers_intent(self, assessment):
+        result = ask_question("Give me a briefing", assessment)
+        assert isinstance(result["answer"], str) and len(result["answer"]) > 10
+
+    def test_briefing_response_has_required_keys(self, assessment):
+        result = ask_question("Brief me as an astronaut", assessment)
+        assert "question" in result
+        assert "answer" in result
+        assert "source" in result
+
+    def test_briefing_astronaut_mentions_radiation_or_communications(self, assessment):
+        result = ask_question("Brief me as an astronaut", assessment)
+        answer_lower = result["answer"].lower()
+        assert "radiation" in answer_lower or "communication" in answer_lower or "crew" in answer_lower
+
+    def test_briefing_aviation_mentions_navigation_or_communications(self, assessment):
+        result = ask_question("Briefing for aviation", assessment)
+        answer_lower = result["answer"].lower()
+        assert (
+            "navigation" in answer_lower
+            or "communication" in answer_lower
+            or "hf" in answer_lower
+            or "gps" in answer_lower
+            or "risk" in answer_lower
+        )
+
+    def test_briefing_power_grid_mentions_power_or_geomagnetic(self, assessment):
+        result = ask_question("Brief me for the power grid", assessment)
+        answer_lower = result["answer"].lower()
+        assert (
+            "power" in answer_lower
+            or "geomagnetic" in answer_lower
+            or "grid" in answer_lower
+            or "risk" in answer_lower
+            or "communication" in answer_lower  # communications proxies GIC risk
+        )
+
+    def test_briefing_no_causal_language(self, assessment):
+        forbidden = ["caused", "due to", "resulted in", "was triggered by", "led to"]
+        result = ask_question("Brief me as an astronaut", assessment)
+        for phrase in forbidden:
+            assert phrase not in result["answer"].lower(), (
+                f"Causal phrase '{phrase}' in briefing answer"
+            )
+
+
+# ===========================================================================
+# Regression — existing intents still work after new additions
+# ===========================================================================
+class TestExistingIntentsNoRegression:
+    """Guard against the new intents breaking existing categories."""
+
+    @pytest.fixture(scope="class")
+    def assessment(self):
+        return get_assessment(mode="demo")
+
+    def test_status_still_works(self, assessment):
+        result = ask_question("What is happening right now?", assessment)
+        assert len(result["answer"]) > 10
+
+    def test_why_still_works(self, assessment):
+        result = ask_question("Why is the risk high?", assessment)
+        assert len(result["answer"]) > 0
+
+    def test_changed_still_works(self, assessment):
+        result = ask_question("What changed recently?", assessment)
+        assert len(result["answer"]) > 0
+
+    def test_forecast_still_works(self, assessment):
+        result = ask_question("What is predicted next?", assessment)
+        assert len(result["answer"]) > 0
+
+    def test_events_still_works(self, assessment):
+        result = ask_question("Are there any external events?", assessment)
+        assert len(result["answer"]) > 0
+
+    def test_recommend_still_works(self, assessment):
+        result = ask_question("What should operators monitor?", assessment)
+        assert len(result["answer"]) > 0
+
+    def test_fallback_still_works(self, assessment):
+        result = ask_question("xyzzy irrelevant nonsense", assessment)
+        assert "BobVoyage" in result["answer"] or "mission" in result["answer"].lower()
+
+    def test_api_ask_status_returns_200(self):
+        resp = client.post("/api/ask", json={"question": "Status?", "mode": "demo"})
+        assert resp.status_code == 200
+
+    def test_api_ask_recurrence_returns_200(self):
+        resp = client.post("/api/ask", json={"question": "recurrence forecast", "mode": "demo"})
+        assert resp.status_code == 200
+
+    def test_api_ask_briefing_astronaut_returns_200(self):
+        resp = client.post("/api/ask", json={"question": "Brief me as an astronaut", "mode": "demo"})
+        assert resp.status_code == 200
+
+    def test_api_ask_briefing_aviation_returns_200(self):
+        resp = client.post("/api/ask", json={"question": "Briefing for aviation", "mode": "demo"})
+        assert resp.status_code == 200
+
+    def test_api_ask_briefing_power_grid_returns_200(self):
+        resp = client.post("/api/ask", json={"question": "Explain for the power grid", "mode": "demo"})
+        assert resp.status_code == 200
+
+    def test_api_ask_briefing_satellite_operator_returns_200(self):
+        resp = client.post("/api/ask", json={"question": "Brief me as a satellite operator", "mode": "demo"})
+        assert resp.status_code == 200
+
+
+# ===========================================================================
+# Service helpers — new additions
+# ===========================================================================
+class TestNewServiceHelpers:
+
+    def test_build_risk_assessment_from_context_shape(self):
+        assessment = get_assessment(mode="demo")
+        ra = _build_risk_assessment_from_context(assessment)
+        for key in ("status", "overall_risk", "domains", "evidence", "recommendations"):
+            assert key in ra, f"Missing key '{key}' in reconstructed risk assessment"
+
+    def test_build_risk_assessment_overall_risk_has_level(self):
+        assessment = get_assessment(mode="demo")
+        ra = _build_risk_assessment_from_context(assessment)
+        assert "level" in ra["overall_risk"]
+
+    def test_build_risk_assessment_domains_is_list(self):
+        assessment = get_assessment(mode="demo")
+        ra = _build_risk_assessment_from_context(assessment)
+        assert isinstance(ra["domains"], list)
+
+    def test_audience_keywords_cover_all_four_audiences(self):
+        audience_values = set(_AUDIENCE_KEYWORDS.values())
+        for expected in ("satellite_operator", "astronaut", "aviation", "power_grid"):
+            assert expected in audience_values, f"Missing audience '{expected}' in _AUDIENCE_KEYWORDS"
+
+    def test_dashboard_html_has_recurrence_button(self):
+        resp = client.get("/")
+        assert resp.status_code == 200
+        assert "Recurrence?" in resp.text
+
+    def test_dashboard_html_has_astronaut_button(self):
+        resp = client.get("/")
+        assert resp.status_code == 200
+        assert "Brief for astronaut?" in resp.text

@@ -612,6 +612,39 @@ class TestInternalHelpers:
         combined = " ".join(result).lower()
         assert "radiation" in combined
 
+    def test_filter_recommendations_astronaut_excludes_power_system(self):
+        """'Elevated power-system risk' must NOT appear for astronaut — 'eva' substring
+        collision was the original bug."""
+        recs = ["Significant radiation indicators. Review scheduling.",
+                "Elevated power-system risk. Review operations with high power demand.",
+                "Communications may be significantly affected. Increase link-margin monitoring."]
+        result = _filter_recommendations(recs, "astronaut")
+        combined = " ".join(result).lower()
+        # radiation should be there; power-system text should not
+        assert "radiation" in combined
+        assert "power-system" not in combined
+
+    def test_filter_recommendations_general_only_when_no_domain_match(self):
+        """General recs (no domain keyword) should only be returned as fallback."""
+        general_recs = [
+            "Conditions nominal. Maintain standard monitoring cadence.",
+            "Stay hydrated.",
+        ]
+        result = _filter_recommendations(general_recs, "astronaut")
+        # No domain-specific match → fallback to general recs
+        assert result == general_recs
+
+    def test_filter_recommendations_general_not_prepended_when_domain_match_exists(self):
+        """General recs must NOT appear alongside domain-specific matches."""
+        recs = [
+            "Conditions nominal. Maintain standard monitoring cadence.",  # general
+            "Significant radiation indicators. Review scheduling.",         # astronaut
+        ]
+        result = _filter_recommendations(recs, "astronaut")
+        # Only the domain-specific rec should be returned; general is suppressed
+        assert len(result) == 1
+        assert "radiation" in result[0].lower()
+
     def test_filter_recommendations_empty_input(self):
         assert _filter_recommendations([], "aviation") == []
 
@@ -676,3 +709,74 @@ class TestEndToEnd:
                 f"audience='{audience}' returned unexpected domains: "
                 f"{returned - set(expected_domains)}"
             )
+
+
+# ===========================================================================
+# Action items differentiation — the original gap this fix addresses
+# ===========================================================================
+
+class TestActionItemsDifferentiation:
+    """
+    Given the SAME high-risk risk_assessment, the 4 audiences must produce
+    action_items that are meaningfully different from each other.
+
+    This was the gap left by the previous test suite: tests only checked
+    that action_items was non-empty, not that audiences were actually
+    being filtered differently.
+    """
+
+    @pytest.fixture(scope="class")
+    def briefings(self):
+        ra = _high_risk_assessment()
+        return {
+            audience: generate_stakeholder_briefing(ra, audience)
+            for audience in ("satellite_operator", "astronaut", "aviation", "power_grid")
+        }
+
+    def test_all_four_audiences_produce_different_action_items(self, briefings):
+        """Core regression guard: no two audiences should share identical action_items."""
+        items = {
+            audience: frozenset(b["action_items"])
+            for audience, b in briefings.items()
+        }
+        unique_sets = set(items.values())
+        assert len(unique_sets) == 4, (
+            "Expected 4 distinct action_item sets, got "
+            f"{len(unique_sets)}.\n" +
+            "\n".join(f"  {a}: {list(v)}" for a, v in items.items())
+        )
+
+    def test_astronaut_action_items_contain_radiation(self, briefings):
+        combined = " ".join(briefings["astronaut"]["action_items"]).lower()
+        assert "radiation" in combined
+
+    def test_astronaut_action_items_do_not_contain_power_system(self, briefings):
+        """Regression: 'Elevated power-system' must not bleed into astronaut via 'eva' match."""
+        combined = " ".join(briefings["astronaut"]["action_items"]).lower()
+        assert "power-system" not in combined
+
+    def test_satellite_operator_action_items_contain_navigation(self, briefings):
+        combined = " ".join(briefings["satellite_operator"]["action_items"]).lower()
+        assert "navigation" in combined
+
+    def test_aviation_action_items_contain_communication_and_navigation(self, briefings):
+        combined = " ".join(briefings["aviation"]["action_items"]).lower()
+        assert "communication" in combined or "navigation" in combined
+
+    def test_aviation_does_not_contain_radiation(self, briefings):
+        combined = " ".join(briefings["aviation"]["action_items"]).lower()
+        assert "radiation" not in combined
+
+    def test_power_grid_action_items_contain_power_or_communication(self, briefings):
+        combined = " ".join(briefings["power_grid"]["action_items"]).lower()
+        assert "power" in combined or "communication" in combined
+
+    def test_power_grid_does_not_contain_radiation(self, briefings):
+        combined = " ".join(briefings["power_grid"]["action_items"]).lower()
+        assert "radiation" not in combined
+
+    def test_astronaut_and_aviation_have_different_items(self, briefings):
+        assert frozenset(briefings["astronaut"]["action_items"]) != frozenset(briefings["aviation"]["action_items"])
+
+    def test_astronaut_and_power_grid_have_different_items(self, briefings):
+        assert frozenset(briefings["astronaut"]["action_items"]) != frozenset(briefings["power_grid"]["action_items"])

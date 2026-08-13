@@ -30,9 +30,32 @@ from bobvoyage.tools.detect_anomalies import detect_anomalies
 from bobvoyage.tools.predict_conditions import predict_conditions
 from bobvoyage.tools.correlate_space_events import correlate_space_events
 from bobvoyage.tools.assess_mission_risk import assess_mission_risk
+from bobvoyage.tools.recurrence_forecast import recurrence_forecast
+from bobvoyage.tools.stakeholder_briefing import generate_stakeholder_briefing
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[3]
 _DEFAULT_CSV  = _PROJECT_ROOT / "data" / "space_weather.csv"
+_UNIFIED_CSV  = _PROJECT_ROOT / "data" / "space_weather_unified.csv"
+
+# Audience keywords → normalised audience name for stakeholder_briefing
+_AUDIENCE_KEYWORDS: dict[str, str] = {
+    "astronaut":          "astronaut",
+    "crew":               "astronaut",
+    "iss":                "astronaut",
+    "satellite":          "satellite_operator",
+    "satellite operator": "satellite_operator",
+    "operator":           "satellite_operator",
+    "aviation":           "aviation",
+    "pilot":              "aviation",
+    "aircraft":           "aviation",
+    "airline":            "aviation",
+    "flight":             "aviation",
+    "power grid":         "power_grid",
+    "power_grid":         "power_grid",
+    "grid":               "power_grid",
+    "utility":            "power_grid",
+    "transmission":       "power_grid",
+}
 
 # ---------------------------------------------------------------------------
 # Demo-mode synthetic events (deterministic, no network)
@@ -138,6 +161,24 @@ def _build_telemetry(conditions: dict, meta: dict) -> list[dict]:
     return rows
 
 
+def _build_risk_assessment_from_context(assessment: dict) -> dict:
+    """
+    Reconstruct a dict that matches the shape expected by
+    generate_stakeholder_briefing() (i.e. the output of assess_mission_risk())
+    from the cached dashboard assessment object.
+    """
+    return {
+        "status":            "ok",
+        "overall_risk":      assessment.get("risk", {}),
+        "domains":           assessment.get("risk", {}).get("domains", []),
+        "correlated_events": assessment.get("correlated_events", []),
+        "evidence":          assessment.get("evidence", {}),
+        "recommendations":   assessment.get("recommendations", []),
+        "mission_profile":   assessment.get("mission_profile", {}),
+        "message":           "",
+    }
+
+
 def _build_conversational_response(
     question: str,
     assessment: dict,
@@ -160,6 +201,76 @@ def _build_conversational_response(
                 f"Mission risk is **{level}** ({score}/100)."
             )
         return f"Current mission risk is **{level}** ({score}/100). No observation data available."
+
+    # --- recurrence intent (checked early — "forecast" keyword overlap) ------
+    if any(w in q for w in ("recurrence", "active region",
+                             "rotate", "reappear", "re-entry", "reentry",
+                             "come back")):
+        dataset = str(_UNIFIED_CSV) if _UNIFIED_CSV.exists() else None
+        rf = recurrence_forecast(lookback_days=45, min_flares=2, dataset_path=dataset)
+        if rf.get("status") != "ok" or not rf.get("regions"):
+            return (
+                "No active solar regions with elevated recurrence risk were found "
+                "in the current lookback window."
+            )
+        top = rf["regions"][0]
+        ar      = top["active_region"]
+        level   = top["risk_level"].replace("_", " ")
+        score   = top["risk_score"]
+        nflares = top["flare_count"]
+        strongest = top.get("strongest_flare") or "unknown"
+        rw = top.get("forecast_reentry_window")
+        reentry_txt = ""
+        if rw:
+            reentry_txt = (
+                f"\n  • PROJECTED: Re-entry window: "
+                f"{rw['start'][:10]} → {rw['end'][:10]} "
+                f"(physics-based projection — not a guaranteed event)"
+            )
+        total = len(rf["regions"])
+        return (
+            f"**Active region recurrence forecast**\n"
+            f"  • OBSERVED: Top region by risk — AR {ar} "
+            f"({nflares} flares recorded, strongest: {strongest})\n"
+            f"  • ANALYZED: Recurrence risk level — **{level}** (score {score}/100)"
+            f"{reentry_txt}\n\n"
+            f"  {total} region(s) analysed in the current lookback window. "
+            f"Risk labels reflect flare productivity and rotational phase — "
+            f"region persistence across a full rotation is not guaranteed."
+        )
+
+    # --- briefing intent (checked early — "explain" / "operator" overlap) ---
+    if any(w in q for w in ("brief", "briefing", "explain for", "translate",
+                             "astronaut", "satellite operator", "aviation",
+                             "power grid", "grid operator",
+                             "for the power grid", "for aviation")):
+        # Detect audience
+        audience = None
+        for keyword, mapped in _AUDIENCE_KEYWORDS.items():
+            if keyword in q:
+                audience = mapped
+                break
+        if audience is None:
+            audience = "satellite_operator"  # sensible default
+
+        # Build risk assessment from current pipeline data
+        ra = _build_risk_assessment_from_context(assessment)
+        briefing = generate_stakeholder_briefing(
+            risk_assessment=ra,
+            audience=audience,
+        )
+        if briefing.get("status") != "ok":
+            return f"Could not generate briefing: {briefing.get('message', 'unknown error')}"
+
+        summary = briefing.get("risk_summary", "")
+        items   = briefing.get("action_items", [])
+        label   = audience.replace("_", " ").title()
+
+        body_lines = [f"**Space-weather briefing — {label}**", f"{summary}"]
+        if items:
+            body_lines.append("\n**Recommended actions:**")
+            body_lines.extend(f"  • {i}" for i in items[:4])
+        return "\n".join(body_lines)
 
     if any(w in q for w in ("why", "reason", "explain", "driver", "high", "cause")):
         domains = assessment.get("risk", {}).get("domains", [])

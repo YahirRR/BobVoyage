@@ -166,11 +166,12 @@ _PARAM_PLAIN_NAMES: dict[str, str] = {
 # ---------------------------------------------------------------------------
 
 _AUDIENCE_REC_KEYWORDS: dict[str, list[str]] = {
-    "satellite_operator": ["communication", "navigation", "attitude", "power", "link", "uplink",
-                           "downlink", "spacecraft", "satellite", "manoeuvre", "orbit"],
-    "astronaut":          ["radiation", "dose", "eva", "crew", "communication"],
-    "aviation":           ["communication", "navigation", "hf", "gps", "ionospheric", "rf"],
-    "power_grid":         ["power", "geomagnetic", "induced", "transformer", "grid", "communication"],
+    "satellite_operator": ["communication", "navigation", "attitude", "power", "link-margin",
+                           "uplink", "downlink", "spacecraft", "satellite", "manoeuvre", "orbit"],
+    "astronaut":          ["radiation", "dose", "crew"],
+    "aviation":           ["communication", "navigation", "hf radio", "gnss", "ionospheric", "gps"],
+    "power_grid":         ["power", "geomagnetic", "induced current", "transformer", "grid",
+                           "communication"],
 }
 
 
@@ -333,28 +334,39 @@ def _filter_recommendations(
 ) -> list[str]:
     """
     Return recommendations relevant to the audience by keyword matching.
-    If none match, return the full list (general recommendations always apply).
+
+    Priority order:
+    1. Domain-specific matches (contain an audience keyword) — always included.
+    2. General recs (contain no domain keyword from ANY audience) — included
+       ONLY as a fallback when there are zero domain-specific matches, so that
+       action_items is never empty.
+
+    This ensures different audiences produce meaningfully different action_items
+    rather than sharing a common block of generic preamble recs.
     """
     keywords = _AUDIENCE_REC_KEYWORDS.get(audience, [])
     if not keywords:
         return list(recommendations)
 
+    all_domain_keywords = {
+        kw for kws in _AUDIENCE_REC_KEYWORDS.values() for kw in kws
+    }
+
+    # Audience-specific domain matches
     matched = [
         r for r in recommendations
         if any(kw in r.lower() for kw in keywords)
     ]
-    # Always include general (non-domain-specific) recs — identified by
-    # the absence of any domain keyword from ALL audiences
-    all_domain_keywords = {
-        kw for kws in _AUDIENCE_REC_KEYWORDS.values() for kw in kws
-    }
+
+    if matched:
+        return matched
+
+    # Fallback: no domain-specific rec exists — return general (non-domain) recs
     general = [
         r for r in recommendations
         if not any(kw in r.lower() for kw in all_domain_keywords)
     ]
-
-    combined = general + [r for r in matched if r not in general]
-    return combined if combined else list(recommendations)
+    return general if general else list(recommendations)
 
 
 def _build_evidence_note(risk_assessment: dict) -> str:
