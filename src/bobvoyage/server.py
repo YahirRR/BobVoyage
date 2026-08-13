@@ -20,6 +20,7 @@ from bobvoyage.tools.predict_conditions import predict_conditions
 from bobvoyage.tools.assess_mission_risk import assess_mission_risk, DEFAULT_MISSION_PROFILE
 from bobvoyage.tools.correlate_space_events import correlate_space_events
 from bobvoyage.tools.recurrence_forecast import recurrence_forecast
+from bobvoyage.tools.stakeholder_briefing import generate_stakeholder_briefing
 
 # ---------------------------------------------------------------------------
 # Server definition
@@ -345,6 +346,41 @@ async def list_tools() -> list[Tool]:
                 "required": [],
             },
         ),
+        Tool(
+            name="stakeholder_briefing",
+            description=(
+                "Translate the output of assess_mission_risk() into clear, "
+                "audience-specific natural language for one of four operational "
+                "communities: satellite_operator, astronaut, aviation, or power_grid. "
+                "Filters the five risk domains down to the subset relevant to the "
+                "requested audience, rewrites technical drivers in plain English, "
+                "selects matching action items from the upstream recommendations, "
+                "and returns a concise risk summary and evidence provenance note. "
+                "Translation and filtering only — no new risk values are computed."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "risk_assessment": {
+                        "type": "object",
+                        "description": (
+                            "The complete dict returned by assess_mission_risk(). "
+                            "Must contain at minimum the keys 'overall_risk' and 'domains'."
+                        ),
+                    },
+                    "audience": {
+                        "type": "string",
+                        "description": (
+                            "Target audience for the briefing. "
+                            "Must be one of: 'satellite_operator', 'astronaut', "
+                            "'aviation', 'power_grid'."
+                        ),
+                        "enum": ["satellite_operator", "astronaut", "aviation", "power_grid"],
+                    },
+                },
+                "required": ["risk_assessment", "audience"],
+            },
+        ),
     ]
 
 
@@ -419,7 +455,14 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             min_flares     = arguments.get("min_flares", 2),
         )
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
-        
+
+    if name == "stakeholder_briefing":
+        result = generate_stakeholder_briefing(
+            risk_assessment = arguments.get("risk_assessment"),
+            audience        = arguments.get("audience"),
+        )
+        return [TextContent(type="text", text=json.dumps(result, indent=2))]
+
     return [
         TextContent(
             type="text",
