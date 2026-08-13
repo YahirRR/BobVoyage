@@ -19,6 +19,7 @@ from bobvoyage.tools.detect_anomalies import detect_anomalies
 from bobvoyage.tools.predict_conditions import predict_conditions
 from bobvoyage.tools.assess_mission_risk import assess_mission_risk, DEFAULT_MISSION_PROFILE
 from bobvoyage.tools.correlate_space_events import correlate_space_events
+from bobvoyage.tools.recurrence_forecast import recurrence_forecast
 
 # ---------------------------------------------------------------------------
 # Server definition
@@ -287,6 +288,63 @@ async def list_tools() -> list[Tool]:
                 "required": [],
             },
         ),
+        Tool(
+            name="recurrence_forecast",
+            description=(
+                "Forecast recurrence risk for solar active regions using heliographic "
+                "position (source_location) and the Sun's synodic rotation rate. "
+                "Identifies regions with a history of strong flare production that are "
+                "approaching or past the west limb, and projects a re-entry window when "
+                "they may rotate back into an Earth-facing position (~27 days later). "
+                "This is a physics-based projection, not a guaranteed prediction — active "
+                "region NOAA numbers are not reliable persistence trackers, so recurrence "
+                "risk is reported as low/moderate/elevated, never as a certain event."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "active_region": {
+                        "type": "integer",
+                        "description": (
+                            "Optional. Restrict the forecast to a specific active region "
+                            "number. Omit to scan all regions active within lookback_days."
+                        ),
+                    },
+                    "lookback_days": {
+                        "type": "number",
+                        "description": (
+                            "Only consider regions whose most recent flare falls within "
+                            "this many days of 'as_of'. Default 45."
+                        ),
+                        "default": 45.0,
+                    },
+                    "as_of": {
+                        "type": "string",
+                        "description": (
+                            "Optional ISO-8601 timestamp to forecast from. Defaults to "
+                            "the most recent flare timestamp in the dataset."
+                        ),
+                    },
+                    "min_flares": {
+                        "type": "integer",
+                        "description": (
+                            "Minimum flares a region must have to appear in a full scan. "
+                            "Ignored when active_region is specified. Default 2."
+                        ),
+                        "default": 2,
+                        "minimum": 1,
+                    },
+                    "dataset_path": {
+                        "type": "string",
+                        "description": (
+                            "Optional path to the CSV dataset. "
+                            "Defaults to data/space_weather_unified.csv in the project root."
+                        ),
+                    },
+                },
+                "required": [],
+            },
+        ),
     ]
 
 
@@ -349,8 +407,19 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             lookahead_hours   = arguments.get("lookahead_hours", 2.0),
             min_score         = arguments.get("min_score", 0.1),
         )
+        
         return [TextContent(type="text", text=json.dumps(result, indent=2))]
 
+    if name == "recurrence_forecast":
+        result = recurrence_forecast(
+            active_region  = arguments.get("active_region"),
+            lookback_days  = arguments.get("lookback_days", 45.0),
+            as_of          = arguments.get("as_of"),
+            dataset_path   = arguments.get("dataset_path"),
+            min_flares     = arguments.get("min_flares", 2),
+        )
+        return [TextContent(type="text", text=json.dumps(result, indent=2))]
+        
     return [
         TextContent(
             type="text",
