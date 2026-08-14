@@ -435,6 +435,40 @@ class TestEventWeights:
             w = result["correlations"][0]["component_scores"]["event_weight"]
             assert w <= 0.3  # minimum is 0.2
 
+    # -----------------------------------------------------------------------
+    # HSS-specific weight tests
+    # -----------------------------------------------------------------------
+
+    def test_hss_weight_is_not_fallback_other(self):
+        """HSS must NOT use the fallback OTHER weight (0.2); it has its own entry."""
+        hss_w   = self._score_for_type("HSS")
+        other_w = self._score_for_type("OTHER")
+        assert hss_w > other_w, (
+            f"HSS weight ({hss_w}) should be greater than OTHER fallback ({other_w})"
+        )
+
+    def test_hss_weight_equals_0_7(self):
+        """HSS event weight component must be exactly 0.7."""
+        assert self._score_for_type("HSS") == pytest.approx(0.7)
+
+    def test_hss_weight_between_alert_and_flr(self):
+        """HSS (0.7) must be strictly between ALERT (0.4) and FLR (0.8)."""
+        assert self._score_for_type("ALERT") < self._score_for_type("HSS")
+        assert self._score_for_type("HSS")   < self._score_for_type("FLR")
+
+    def test_hss_event_type_recorded_in_correlation(self):
+        """The correlation record for an HSS event must carry event_type='HSS'."""
+        obs    = _baseline_obs(20) + [_obs(offset_hours=0.5)]
+        result = correlate_space_events(
+            events=[_event(event_type="HSS")],
+            observations=obs,
+            lookback_hours=4.0, lookahead_hours=2.0,
+            min_score=0.0,
+        )
+        assert result["status"] == "ok"
+        if result["correlations"]:
+            assert result["correlations"][0]["event"]["type"] == "HSS"
+
 
 # ---------------------------------------------------------------------------
 # Multiple events

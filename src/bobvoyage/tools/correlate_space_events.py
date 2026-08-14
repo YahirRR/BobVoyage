@@ -102,6 +102,9 @@ _EVENT_WEIGHTS: dict[str, float] = {
     "GST":   1.0,
     "SEP":   0.9,
     "FLR":   0.8,
+    "HSS":   0.7,  # High Speed Stream — real solar-activity event (sustained high solar-wind
+                   # velocity); more significant than a generic ALERT (0.4) but less acute than
+                   # CME/GST (1.0) or SEP (0.9). Impact is gradual and sustained rather than impulsive.
     "ALERT": 0.4,
     "OTHER": 0.2,
 }

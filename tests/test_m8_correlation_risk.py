@@ -1012,3 +1012,98 @@ class TestBadgeEventTypeMatchesRealEventType:
         ce = result["correlated_events"][0]
         assert ce["event_id"] == "EV-CME-001"
         assert ce["event_time"] == "2025-07-20T08:00:00+00:00"
+
+
+# ===========================================================================
+# 30. HSS — High Speed Stream has its own entry, not the OTHER fallback
+# ===========================================================================
+class TestHSSEventType:
+    """HSS was previously unrecognised and fell through to the 'OTHER' fallback
+    (radiation 0.05, communications 0.10, …).  These tests confirm it now has
+    dedicated weights that correctly reflect its sustained-wind physical impact.
+
+    Dataset context: 103 of 1743 events (~6%) are HSS — a material fraction
+    that was silently underweighted before this fix.
+    """
+
+    def test_hss_domain_relevance_not_equal_to_other_fallback(self):
+        """Every domain relevance for HSS must differ from the OTHER fallback."""
+        other = _EVENT_DOMAIN_RELEVANCE["OTHER"]
+        hss   = _EVENT_DOMAIN_RELEVANCE["HSS"]
+        for domain in ("radiation", "communications", "navigation",
+                       "power", "attitude_control"):
+            assert hss[domain] != other[domain], (
+                f"HSS[{domain}] == OTHER[{domain}] == {other[domain]}; "
+                "HSS must have its own dedicated weight"
+            )
+
+    def test_hss_communications_relevance_higher_than_other(self):
+        """HSS comms relevance (0.60) must be higher than OTHER (0.10)."""
+        assert _get_event_domain_relevance("HSS", "communications") > \
+               _get_event_domain_relevance("OTHER", "communications")
+
+    def test_hss_attitude_control_relevance_higher_than_other(self):
+        """HSS attitude_control relevance (0.65) must be higher than OTHER (0.05)."""
+        assert _get_event_domain_relevance("HSS", "attitude_control") > \
+               _get_event_domain_relevance("OTHER", "attitude_control")
+
+    def test_hss_radiation_relevance_is_low(self):
+        """HSS is not a particle event; radiation relevance must stay below 0.30."""
+        assert _get_event_domain_relevance("HSS", "radiation") < 0.30
+
+    def test_hss_attitude_control_relevance_equals_0_65(self):
+        """Explicit value check: attitude_control must be 0.65."""
+        assert _get_event_domain_relevance("HSS", "attitude_control") == pytest.approx(0.65)
+
+    def test_hss_communications_relevance_equals_0_60(self):
+        """Explicit value check: communications must be 0.60."""
+        assert _get_event_domain_relevance("HSS", "communications") == pytest.approx(0.60)
+
+    def test_hss_increases_communications_score(self):
+        """A correlated HSS event must raise the communications domain score."""
+        base   = assess_mission_risk(conditions=_nominal_conditions())
+        result = assess_mission_risk(
+            conditions=_nominal_conditions(),
+            correlated_events=[_corr("HSS", 0.80, interpretation="strong_temporal_association")],
+        )
+        base_comms   = next(d["score"] for d in base["domains"]   if d["domain"] == "communications")
+        result_comms = next(d["score"] for d in result["domains"] if d["domain"] == "communications")
+        assert result_comms > base_comms
+
+    def test_hss_increases_attitude_control_score(self):
+        """A correlated HSS must raise attitude_control (sustained wind pressure)."""
+        base   = assess_mission_risk(conditions=_nominal_conditions())
+        result = assess_mission_risk(
+            conditions=_nominal_conditions(),
+            correlated_events=[_corr("HSS", 0.80)],
+        )
+        base_att   = next(d["score"] for d in base["domains"]   if d["domain"] == "attitude_control")
+        result_att = next(d["score"] for d in result["domains"] if d["domain"] == "attitude_control")
+        assert result_att > base_att
+
+    def test_hss_domain_scores_higher_than_other_fallback(self):
+        """With identical correlation score, HSS must yield higher domain scores
+        than an unknown event type that falls back to OTHER weights."""
+        hss_result = assess_mission_risk(
+            conditions=_nominal_conditions(),
+            correlated_events=[_corr("HSS", 0.80)],
+        )
+        other_result = assess_mission_risk(
+            conditions=_nominal_conditions(),
+            correlated_events=[_corr("UNKNOWN_RANDOM_TYPE", 0.80)],
+        )
+        for domain in ("communications", "navigation", "attitude_control"):
+            hss_score   = next(d["score"] for d in hss_result["domains"]   if d["domain"] == domain)
+            other_score = next(d["score"] for d in other_result["domains"] if d["domain"] == domain)
+            assert hss_score > other_score, (
+                f"{domain}: HSS score ({hss_score}) must exceed OTHER fallback score ({other_score})"
+            )
+
+    def test_hss_appears_in_correlated_events_output_with_correct_type(self):
+        """The correlated_events output section must show event_type='HSS'."""
+        result = assess_mission_risk(
+            conditions=_nominal_conditions(),
+            correlated_events=[_corr("HSS", 0.75)],
+        )
+        assert len(result["correlated_events"]) == 1
+        assert result["correlated_events"][0]["event_type"] == "HSS"

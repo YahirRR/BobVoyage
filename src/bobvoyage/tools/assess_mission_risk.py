@@ -246,6 +246,11 @@ _W_FORECAST = 0.15
 #   GST   — geomagnetic storm: disturbs magnetosphere → comms scintillation,
 #            severe ionospheric navigation errors, magnetic-torque effects on
 #            attitude; induced currents threaten power systems moderately.
+#   HSS   — High Speed Stream: sustained high-velocity solar wind perturbs the
+#            magnetosphere causing sub-storms (comms, navigation, attitude_control);
+#            not a particle event so radiation risk is low; induced currents are
+#            minor compared with CME/GST.  Previously fell through to "OTHER" with
+#            minimal weight, underestimating impact (103 of 1743 dataset events, ~6%).
 #   ALERT — generic NOAA alert; conservative lower weights applied uniformly.
 #   OTHER — unknown event type; minimal default weights.
 #
@@ -281,6 +286,17 @@ _EVENT_DOMAIN_RELEVANCE: dict[str, dict[str, float]] = {
         "navigation":      0.85,
         "power":           0.20,
         "attitude_control": 0.70,
+    },
+    "HSS": {
+        # High Speed Stream — sustained high-velocity solar wind (~600–800 km/s).
+        # Distinct from CME/GST in that effects are gradual and continuous rather
+        # than impulsive.  103 of 1743 dataset events (~6%) previously fell through
+        # to "OTHER" with weight 0.05, severely underestimating real mission impact.
+        "radiation":        0.15,  # HSS is not a particle event; low direct radiation risk
+        "communications":   0.60,  # sustained wind perturbs magnetosphere → sub-storms → comms
+        "navigation":       0.55,  # prolonged ionospheric degradation affects GNSS accuracy
+        "power":            0.25,  # minor induced currents; less severe than CME/GST
+        "attitude_control": 0.65,  # sustained solar-wind pressure produces persistent torque
     },
     "ALERT": {
         "radiation":       0.10,
