@@ -542,7 +542,8 @@ def _build_correlated_events_output(
 
     for corr in correlations:
         score  = corr.get("correlation_score", 0.0) or 0.0
-        etype  = str(corr.get("event_type", "OTHER")).upper()
+        ev_sub = corr.get("event") or {}
+        etype  = str(ev_sub.get("type") or corr.get("event_type") or "OTHER").upper()
 
         # Per-domain contributions (pre-cap, for reporting)
         affected_domains: list[str] = []
@@ -583,8 +584,8 @@ def _build_correlated_events_output(
 
         result.append({
             "event_type":         etype,
-            "event_id":           corr.get("event_id"),
-            "event_time":         corr.get("event_time"),
+            "event_id":           ev_sub.get("external_id") or corr.get("event_id"),
+            "event_time":         ev_sub.get("event_time") or corr.get("event_time"),
             "correlation_score":  round(score, 3),
             "interpretation":     interp,
             "affected_domains":   affected_domains,

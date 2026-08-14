@@ -880,3 +880,135 @@ class TestInternalHelpers:
         )
         scores = [c["correlation_score"] for c in output]
         assert scores == sorted(scores, reverse=True)
+
+
+# ===========================================================================
+# 29. Badge event_type matches event["type"] from correlate_space_events output
+#
+# Regression test for the bug where _build_correlated_events_output read
+# corr.get("event_type", "OTHER") instead of corr["event"]["type"], causing
+# every badge to show "OTHER" while the evidence text showed the real type.
+# ===========================================================================
+class TestBadgeEventTypeMatchesRealEventType:
+    """The event_type field surfaced in correlated_events (used by the dashboard
+    badge) must equal the type nested inside the correlation's 'event' sub-dict,
+    exactly as returned by correlate_space_events()."""
+
+    def _make_corr_from_correlate_output(self, event_type: str, score: float) -> dict:
+        """Construct a correlation dict in the exact shape that
+        correlate_space_events._build_correlation() returns."""
+        return {
+            # NO top-level 'event_type' — the real field lives inside 'event'
+            "event": {
+                "type":        event_type,
+                "event_time":  "2025-07-20T08:00:00+00:00",
+                "external_id": f"EV-{event_type}-001",
+                "source":      "NASA_DONKI",
+                "severity":    "M2.1" if event_type == "FLR" else "moderate",
+                "description": f"Test {event_type} event",
+            },
+            "observations_in_window": 5,
+            "temporal_distance_minutes": 12.0,
+            "top_deviations": [],
+            "correlation_score": score,
+            "interpretation":   "moderate_temporal_association",
+            "component_scores": {
+                "temporal": 0.70, "anomaly": 0.60, "trend": 0.30, "event_weight": 0.80,
+            },
+            "evidence": [
+                f"OBSERVED: {event_type} event has reported severity: M2.1."
+            ],
+        }
+
+    def test_cme_badge_matches_nested_event_type(self):
+        corr = self._make_corr_from_correlate_output("CME", 0.80)
+        result = assess_mission_risk(
+            conditions=_nominal_conditions(),
+            correlated_events=[corr],
+        )
+        ce = result["correlated_events"][0]
+        assert ce["event_type"] == "CME", (
+            f"Badge shows '{ce['event_type']}' but event['type'] is 'CME'"
+        )
+
+    def test_flr_badge_matches_nested_event_type(self):
+        corr = self._make_corr_from_correlate_output("FLR", 0.75)
+        result = assess_mission_risk(
+            conditions=_nominal_conditions(),
+            correlated_events=[corr],
+        )
+        ce = result["correlated_events"][0]
+        assert ce["event_type"] == "FLR", (
+            f"Badge shows '{ce['event_type']}' but event['type'] is 'FLR'"
+        )
+
+    def test_gst_badge_matches_nested_event_type(self):
+        corr = self._make_corr_from_correlate_output("GST", 0.70)
+        result = assess_mission_risk(
+            conditions=_nominal_conditions(),
+            correlated_events=[corr],
+        )
+        ce = result["correlated_events"][0]
+        assert ce["event_type"] == "GST"
+
+    def test_sep_badge_matches_nested_event_type(self):
+        corr = self._make_corr_from_correlate_output("SEP", 0.85)
+        result = assess_mission_risk(
+            conditions=_nominal_conditions(),
+            correlated_events=[corr],
+        )
+        ce = result["correlated_events"][0]
+        assert ce["event_type"] == "SEP"
+
+    def test_badge_not_other_when_real_type_is_cme(self):
+        """Explicit guard against the original bug: badge must NOT be 'OTHER'
+        when the nested event type is 'CME'."""
+        corr = self._make_corr_from_correlate_output("CME", 0.80)
+        result = assess_mission_risk(
+            conditions=_nominal_conditions(),
+            correlated_events=[corr],
+        )
+        ce = result["correlated_events"][0]
+        assert ce["event_type"] != "OTHER", (
+            "Badge is 'OTHER' but real event type is 'CME' — nested-field bug not fixed"
+        )
+
+    def test_badge_not_other_when_real_type_is_flr(self):
+        corr = self._make_corr_from_correlate_output("FLR", 0.75)
+        result = assess_mission_risk(
+            conditions=_nominal_conditions(),
+            correlated_events=[corr],
+        )
+        ce = result["correlated_events"][0]
+        assert ce["event_type"] != "OTHER", (
+            "Badge is 'OTHER' but real event type is 'FLR' — nested-field bug not fixed"
+        )
+
+    def test_event_type_consistent_with_evidence_text(self):
+        """The badge event_type and the evidence text must name the same event type."""
+        for etype in ("CME", "FLR", "GST", "SEP"):
+            corr = self._make_corr_from_correlate_output(etype, 0.75)
+            result = assess_mission_risk(
+                conditions=_nominal_conditions(),
+                correlated_events=[corr],
+            )
+            ce = result["correlated_events"][0]
+            badge_type = ce["event_type"]
+            # The first evidence entry injected above mentions the real event type
+            evidence_text = " ".join(ce["evidence"]).upper()
+            assert badge_type in evidence_text, (
+                f"Badge says '{badge_type}' but '{etype}' evidence text doesn't contain it. "
+                f"Evidence: {ce['evidence']}"
+            )
+
+    def test_event_id_and_event_time_from_nested_event(self):
+        """event_id and event_time in the output must come from event.external_id
+        and event.event_time, not from top-level keys that don't exist."""
+        corr = self._make_corr_from_correlate_output("CME", 0.80)
+        result = assess_mission_risk(
+            conditions=_nominal_conditions(),
+            correlated_events=[corr],
+        )
+        ce = result["correlated_events"][0]
+        assert ce["event_id"] == "EV-CME-001"
+        assert ce["event_time"] == "2025-07-20T08:00:00+00:00"
