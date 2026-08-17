@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "bobvoyage": {
+      "type": "streamable-http",
+      "url": "http://localhost:8090/mcp",
+      "alwaysAllow": [
+        "get_current_conditions_tool",
+        "analyze_trends_tool",
+        "detect_anomalies_tool",
+        "predict_conditions_tool",
+        "correlate_space_events_tool",
+        "assess_mission_risk_tool",
+        "recurrence_forecast_tool",
+        "generate_stakeholder_briefing_tool"
+      ]
+    }
+  }
+}
