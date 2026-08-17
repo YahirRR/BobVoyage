@@ -40,10 +40,8 @@ from pathlib import Path
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
-from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse
-from starlette.routing import Mount, Route
 
 from bobvoyage.config import MCP_PATH, CORS_ORIGINS
 from bobvoyage.tools.current_conditions import get_current_conditions
@@ -358,11 +356,12 @@ def stakeholder_briefing_tool(
 
 
 # ---------------------------------------------------------------------------
-# Starlette ASGI application
+# Health check — registered as a custom FastMCP route so it lives in the
+# same Starlette app as the MCP endpoint (no Mount prefix stripping).
 # ---------------------------------------------------------------------------
-# Compose: MCP at MCP_PATH + /health outside the MCP protocol.
 
-async def health(request: Request) -> JSONResponse:
+@mcp.custom_route("/health", methods=["GET"])
+async def _health(request: Request) -> JSONResponse:
     """Lightweight health check for load-balancers and deployment probes."""
     return JSONResponse({
         "status": "ok",
@@ -373,16 +372,17 @@ async def health(request: Request) -> JSONResponse:
     })
 
 
-def _build_app() -> Starlette:
-    """Build the ASGI application, optionally adding CORS middleware."""
-    mcp_asgi = mcp.streamable_http_app()
+def _build_app():
+    """
+    Build the ASGI application.
 
-    routes = [
-        Route("/health", health),
-        Mount(MCP_PATH, app=mcp_asgi),
-    ]
+    Uses mcp.streamable_http_app() directly as the root ASGI app so that
+    the MCP endpoint sits at MCP_PATH with no sub-application mount
+    (avoids the Starlette Mount 307-redirect on paths without trailing slash).
 
-    starlette_app = Starlette(routes=routes)
+    CORS is added when BOBVOYAGE_CORS_ORIGINS is set.
+    """
+    starlette_app = mcp.streamable_http_app()
 
     if CORS_ORIGINS:
         from starlette.middleware.cors import CORSMiddleware
